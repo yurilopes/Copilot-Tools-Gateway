@@ -66,10 +66,6 @@ class ConsumerDriver:
         conversation_id: str | None,
         timeout_seconds: int,
     ) -> Iterator[str | GeneratedImage | ConsumerConversation]:
-        websocket_url = f"{CHAT_WEBSOCKET_URL}&clientSessionId={uuid.uuid4()}"
-        if access_token:
-            websocket_url = f"{websocket_url}&accessToken={quote(access_token)}"
-
         headers = {
             "Content-Type": "application/json",
             "User-Agent": "CopilotNative/30.0.440505001-prod (Android 14; Google; Pixel 8 Pro)",
@@ -94,7 +90,18 @@ class ConsumerDriver:
                     "mode": "chat",
                 }
             ).encode("utf-8")
-            websocket = session.ws_connect(websocket_url, headers={"Origin": COPILOT_URL})
+            try:
+                websocket = session.ws_connect(
+                    _websocket_url(access_token),
+                    headers={"Origin": COPILOT_URL},
+                )
+            except CurlError:
+                if access_token is None:
+                    raise
+                websocket = session.ws_connect(
+                    _websocket_url(None),
+                    headers={"Origin": COPILOT_URL},
+                )
             websocket.send(send_frame, CurlWsFlag.TEXT)
             yield from self._read_stream(websocket, send_frame, timeout_seconds)
 
@@ -186,6 +193,11 @@ class ConsumerDriver:
                 elif event == "done":
                     return
                 elif event == "error":
+                    error_code = message.get("errorCode")
+                    if isinstance(error_code, str) and error_code:
+                        raise UpstreamProtocolError(
+                            f"Consumer Copilot returned an error event: {error_code}"
+                        )
                     raise UpstreamProtocolError("Consumer Copilot returned an error event")
         if not started:
             raise UpstreamProtocolError("Consumer Copilot did not start streaming")
@@ -249,3 +261,10 @@ def _response_json(response: object) -> object:
     if not callable(json_method):
         raise UpstreamProtocolError("Consumer response did not expose JSON")
     return json_method()
+
+
+def _websocket_url(access_token: str | None) -> str:
+    websocket_url = f"{CHAT_WEBSOCKET_URL}&clientSessionId={uuid.uuid4()}"
+    if access_token:
+        return f"{websocket_url}&accessToken={quote(access_token, safe='')}"
+    return websocket_url

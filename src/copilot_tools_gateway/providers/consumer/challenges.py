@@ -1,6 +1,7 @@
 """Consumer Copilot proof-of-work challenge solvers."""
 
 import base64
+import binascii
 import hashlib
 import math
 import struct
@@ -9,7 +10,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class HashcashChallenge:
-    prefix: str
+    seed: str
     difficulty: int
 
 
@@ -23,19 +24,29 @@ def solve_hashcash(parameter: str) -> str:
     challenge = _parse_hashcash(parameter)
     nonce = 0
     while True:
-        candidate = f"{challenge.prefix}{nonce}"
+        candidate = f"{challenge.seed}{nonce}"
         digest = hashlib.sha256(candidate.encode("utf-8")).digest()
         if _leading_zero_bits(digest) >= challenge.difficulty:
-            return base64.b64encode(candidate.encode("utf-8")).decode("ascii")
+            return str(nonce)
         nonce += 1
 
 
 def _parse_hashcash(parameter: str) -> HashcashChallenge:
-    decoded = base64.b64decode(parameter).decode("utf-8")
-    parts = decoded.split(":")
-    if len(parts) < 2:
+    decoded = parameter if ":" in parameter else _decode_hashcash_parameter(parameter)
+    seed, separator, difficulty = decoded.rpartition(":")
+    if not separator or not seed:
         raise ValueError("Invalid hashcash challenge")
-    return HashcashChallenge(prefix=f"{decoded}:", difficulty=int(parts[1]))
+    return HashcashChallenge(seed=seed, difficulty=int(difficulty))
+
+
+def _decode_hashcash_parameter(parameter: str) -> str:
+    padded = parameter + "=" * (-len(parameter) % 4)
+    for decoder in (base64.b64decode, base64.urlsafe_b64decode):
+        try:
+            return decoder(padded).decode("utf-8")
+        except (binascii.Error, UnicodeDecodeError):
+            continue
+    return parameter
 
 
 def _leading_zero_bits(data: bytes) -> int:

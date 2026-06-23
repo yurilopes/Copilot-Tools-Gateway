@@ -2,10 +2,12 @@
 
 import asyncio
 import json
+import threading
 import uuid
-from collections.abc import Iterator
+from collections.abc import Coroutine, Iterator
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Generic, Protocol, TypeVar
 from urllib.parse import quote, urlencode
 
 from websockets.asyncio.client import connect
@@ -39,6 +41,7 @@ from copilot_tools_gateway.providers.m365.protocol import (
 
 BASE_URL = "wss://substrate.office.com/m365Copilot/Chathub"
 M365_ORIGIN = Origin("https://m365.cloud.microsoft")
+AsyncResult = TypeVar("AsyncResult")
 
 
 class SignalRSocket(Protocol):
@@ -47,6 +50,12 @@ class SignalRSocket(Protocol):
 
     async def recv(self) -> str | bytes:
         ...
+
+
+@dataclass
+class AsyncThreadResult(Generic[AsyncResult]):
+    value: AsyncResult | None = None
+    error: BaseException | None = None
 
 
 class M365Provider:
@@ -98,14 +107,14 @@ class M365Provider:
             raise UnsupportedCapabilityError(
                 "M365 provider does not support conversation resume yet"
             )
-        text = asyncio.run(self._chat(prompt))
+        text = run_async(self._chat(prompt))
         return ChatResult(text=text, provider_id=self.provider_id)
 
     def stream(self, prompt: str, conversation_id: str | None = None) -> Iterator[str]:
         yield self.chat(prompt, conversation_id=conversation_id).text
 
     def generate_image(self, prompt: str, count: int = 1) -> list[GeneratedImage]:
-        images = asyncio.run(self._generate_image(prompt))
+        images = run_async(self._generate_image(prompt))
         return images[:count]
 
     def describe_image(self, request: VisionInput) -> ChatResult:
@@ -182,12 +191,11 @@ class M365Provider:
 
     @staticmethod
     def _socket_url(session: M365Session, session_id: str, conversation_id: str) -> str:
-        compact = session_id.replace("-", "")
         query = urlencode(
             {
-                "chatsessionid": compact,
-                "XRoutingParameterSessionKey": compact,
-                "clientrequestid": compact,
+                "chatsessionid": session_id,
+                "XRoutingParameterSessionKey": session_id,
+                "clientrequestid": session_id,
                 "X-SessionId": session_id,
                 "ConversationId": conversation_id,
                 "access_token": session.access_token,
@@ -264,3 +272,27 @@ class M365Provider:
             )
             + RECORD_SEPARATOR
         )
+
+
+def run_async(coroutine: Coroutine[object, object, AsyncResult]) -> AsyncResult:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coroutine)
+
+    result: AsyncThreadResult[AsyncResult] = AsyncThreadResult()
+
+    def run_in_thread() -> None:
+        try:
+            result.value = asyncio.run(coroutine)
+        except BaseException as exc:
+            result.error = exc
+
+    thread = threading.Thread(target=run_in_thread)
+    thread.start()
+    thread.join()
+    if result.error is not None:
+        raise result.error
+    if result.value is None:
+        raise RuntimeError("Async operation finished without a result")
+    return result.value

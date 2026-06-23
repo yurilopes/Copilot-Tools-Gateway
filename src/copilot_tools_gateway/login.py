@@ -3,8 +3,13 @@
 import json
 import time
 from collections.abc import Mapping
+from contextlib import suppress
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
+
+from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import Page
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from copilot_tools_gateway.domain.errors import LoginFailedError
 from copilot_tools_gateway.domain.json_types import object_value
@@ -14,6 +19,9 @@ from copilot_tools_gateway.settings import GatewayPaths
 
 CONSUMER_URL = "https://copilot.microsoft.com/"
 M365_URL = "https://m365.cloud.microsoft/chat/"
+CONSUMER_TOKEN_ATTEMPTS = 5
+CONSUMER_ORIGIN_ATTEMPTS = 6
+CONSUMER_TOKEN_RETRY_DELAY_MS = 1_000
 
 CONSUMER_TOKEN_SCRIPT = """
 () => {
@@ -53,7 +61,8 @@ def login_consumer(paths: GatewayPaths) -> Path:
             page = context.pages[0] if context.pages else context.new_page()
             page.goto(CONSUMER_URL, wait_until="domcontentloaded")
             input("Sign in to consumer Copilot if needed, then press Enter here: ")
-            token_value = page.evaluate(CONSUMER_TOKEN_SCRIPT)
+            _open_consumer_origin(page)
+            token_value = _evaluate_consumer_token(page)
             cookies: dict[str, str] = {}
             for cookie in context.cookies():
                 if _cookie_is_microsoft(cookie):
@@ -69,6 +78,51 @@ def login_consumer(paths: GatewayPaths) -> Path:
             return paths.consumer_auth_file
         finally:
             context.close()
+
+
+def _open_consumer_origin(page: Page) -> None:
+    last_error: PlaywrightError | None = None
+    for _ in range(CONSUMER_ORIGIN_ATTEMPTS):
+        with suppress(PlaywrightTimeoutError):
+            page.wait_for_load_state("domcontentloaded", timeout=5_000)
+        if _is_consumer_origin(page.url):
+            return
+        try:
+            page.goto(CONSUMER_URL, wait_until="domcontentloaded", timeout=15_000)
+            if _is_consumer_origin(page.url):
+                return
+        except PlaywrightError as exc:
+            last_error = exc
+            page.wait_for_timeout(CONSUMER_TOKEN_RETRY_DELAY_MS)
+    message = (
+        "Consumer login did not land on copilot.microsoft.com. "
+        "If this account redirects to Microsoft 365 Copilot, run login m365."
+    )
+    if last_error is not None:
+        raise LoginFailedError(message) from last_error
+    raise LoginFailedError(message)
+
+
+def _is_consumer_origin(url: str) -> bool:
+    return url.startswith(CONSUMER_URL)
+
+
+def _evaluate_consumer_token(page: Page) -> object:
+    last_error: PlaywrightError | None = None
+    for _ in range(CONSUMER_TOKEN_ATTEMPTS):
+        try:
+            page.wait_for_load_state("domcontentloaded", timeout=5_000)
+            return page.evaluate(CONSUMER_TOKEN_SCRIPT)
+        except PlaywrightTimeoutError:
+            return page.evaluate(CONSUMER_TOKEN_SCRIPT)
+        except PlaywrightError as exc:
+            last_error = exc
+            page.wait_for_timeout(CONSUMER_TOKEN_RETRY_DELAY_MS)
+    if last_error is not None:
+        raise LoginFailedError(
+            "Consumer login page did not stabilize after sign-in"
+        ) from last_error
+    raise LoginFailedError("Consumer login could not evaluate the signed-in page")
 
 
 def login_m365(paths: GatewayPaths) -> Path:
@@ -89,6 +143,11 @@ def login_m365(paths: GatewayPaths) -> Path:
         if "/m365Copilot/Chathub/" in url:
             _append_session_from_websocket_url(url, candidates)
 
+    def inspect_websocket(websocket: object) -> None:
+        url = getattr(websocket, "url", "")
+        if isinstance(url, str) and "/m365Copilot/Chathub/" in url:
+            _append_session_from_websocket_url(url, candidates)
+
     with sync_playwright() as playwright:
         context = playwright.chromium.launch_persistent_context(
             user_data_dir=str(profile_dir),
@@ -98,6 +157,7 @@ def login_m365(paths: GatewayPaths) -> Path:
         try:
             page = context.pages[0] if context.pages else context.new_page()
             page.on("response", inspect_response)
+            page.on("websocket", inspect_websocket)
             page.goto(M365_URL, wait_until="domcontentloaded")
             input("Sign in to Microsoft 365 Copilot, open chat, then press Enter here: ")
             if not candidates:
