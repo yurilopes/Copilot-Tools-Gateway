@@ -12,10 +12,15 @@ from copilot_tools_gateway.providers.m365.protocol import (
     IMAGE_OPTION_SETS,
     RECORD_SEPARATOR,
     decode_signalr,
+    final_text,
     image_file_annotation,
+    is_final_update,
     local_file_annotation,
+    text_delta,
+    update_text,
 )
 from copilot_tools_gateway.providers.m365.provider import M365Provider
+from copilot_tools_gateway.providers.m365.transport import chat_frame, socket_url
 from copilot_tools_gateway.providers.m365.uploads import (
     M365DocumentAnnotation,
     M365ImageAnnotation,
@@ -23,6 +28,48 @@ from copilot_tools_gateway.providers.m365.uploads import (
     _sharepoint_upload_headers,
     _unfurl_document_body,
 )
+
+
+def test_m365_provider_reports_conversation_resume() -> None:
+    assert M365Provider.capabilities.conversation_resume is True
+
+
+def test_m365_provider_reports_real_streaming() -> None:
+    assert M365Provider.capabilities.streaming is True
+
+
+def test_update_text_reads_partial_and_final_updates() -> None:
+    partial = {
+        "target": "update",
+        "arguments": [
+            {
+                "isLastUpdate": False,
+                "messages": [{"author": "bot", "text": "Hello"}],
+            }
+        ],
+    }
+    final = {
+        "target": "update",
+        "arguments": [
+            {
+                "isLastUpdate": True,
+                "messages": [{"author": "bot", "text": "Hello world"}],
+            }
+        ],
+    }
+
+    assert update_text(partial) == "Hello"
+    assert final_text(partial) is None
+    assert is_final_update(partial) is False
+    assert update_text(final) == "Hello world"
+    assert final_text(final) == "Hello world"
+    assert is_final_update(final) is True
+
+
+def test_text_delta_uses_cumulative_update_suffix() -> None:
+    assert text_delta("Hello", "") == "Hello"
+    assert text_delta("Hello world", "Hello") == " world"
+    assert text_delta("Rewritten", "Hello") == "Rewritten"
 
 
 def test_image_file_annotation_shape() -> None:
@@ -199,7 +246,7 @@ def test_safe_document_metadata_summary_does_not_expose_raw_ids() -> None:
 
 
 def test_chat_frame_includes_message_annotations() -> None:
-    payload = M365Provider._chat_frame(
+    payload = chat_frame(
         prompt="Describe this image",
         session_id="11111111-1111-1111-1111-111111111111",
         option_sets=["chat-option"],
@@ -250,7 +297,7 @@ def test_chat_frame_includes_message_annotations() -> None:
 
 
 def test_chat_frame_is_valid_json_record() -> None:
-    payload = M365Provider._chat_frame(
+    payload = chat_frame(
         prompt="Hello",
         session_id="11111111-1111-1111-1111-111111111111",
         option_sets=["chat-option"],
@@ -264,7 +311,7 @@ def test_chat_frame_is_valid_json_record() -> None:
 
 
 def test_chat_frame_uses_compact_request_id() -> None:
-    payload = M365Provider._chat_frame(
+    payload = chat_frame(
         prompt="Hello",
         session_id="11111111-1111-1111-1111-111111111111",
         option_sets=["chat-option"],
@@ -285,7 +332,7 @@ def test_socket_url_uses_compact_session_query_ids() -> None:
         expires_at=2_000_000_000,
     )
 
-    url = M365Provider._socket_url(
+    url = socket_url(
         session=session,
         session_id="11111111-2222-4333-8444-555555555555",
         conversation_id="66666666-7777-4888-9999-000000000000",

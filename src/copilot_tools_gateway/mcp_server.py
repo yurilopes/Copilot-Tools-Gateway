@@ -31,11 +31,15 @@ def run_mcp_server() -> None:
         return {"providers": statuses}
 
     @server.tool()
-    def copilot_chat(prompt: str, model: str = ProviderId.AUTO.value) -> dict[str, object]:
+    def copilot_chat(
+        prompt: str,
+        model: str = ProviderId.AUTO.value,
+        conversation_id: str | None = None,
+    ) -> dict[str, object]:
         """Ask Copilot for a text response."""
         try:
             provider = registry.resolve(model)
-            result = provider.chat(prompt)
+            result = provider.chat(prompt, conversation_id=conversation_id)
         except GatewayError as exc:
             return {"ok": False, "error": str(exc)}
         return {

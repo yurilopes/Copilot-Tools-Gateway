@@ -34,7 +34,8 @@ vision-style image interpretation when the signed-in account supports them.
 The two account families use different upstream protocols. The gateway hides
 that behind a common provider contract.
 
-- Microsoft 365 Copilot uses the M365 chat service over SignalR WebSocket.
+- Microsoft 365 Copilot uses the M365 chat service over SignalR WebSocket and
+  streams chat text from incremental update events when the upstream sends them.
 - Consumer Copilot uses the public Copilot web protocol with cookies, a Copilot
   chat token when signed in, and challenge responses.
 
@@ -154,6 +155,10 @@ Use the same command in OpenCode, Codex, Claude Desktop, or another MCP client
 that accepts stdio MCP servers. If the client runs outside the repository,
 replace `python` with the absolute path to the virtual environment interpreter.
 
+`copilot_chat` returns a `conversation_id` when the upstream provider supports
+conversation resume. Pass that id back as the optional `conversation_id`
+argument to continue the same upstream conversation.
+
 ### Agent Login And Refresh Flow
 
 Login and refresh are CLI operations, not MCP tools. Agents should use
@@ -231,6 +236,8 @@ curl http://127.0.0.1:3991/v1/chat/completions \
 
 - `copilot-auto` uses the first available configured provider.
 - `m365-copilot` requires a valid M365 session.
+- `m365-copilot` supports real streaming and conversation resume for
+  `copilot_chat` through the returned `conversation_id`.
 - `copilot` requires a valid consumer session. It supports image attachments
   for PNG and JPEG files, but not document attachments.
 

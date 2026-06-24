@@ -200,10 +200,16 @@ def signalr_handshake() -> str:
 
 
 def final_text(message: Mapping[str, JsonValue]) -> str | None:
+    if not is_final_update(message):
+        return None
+    return update_text(message)
+
+
+def update_text(message: Mapping[str, JsonValue]) -> str | None:
     if message.get("target") != "update":
         return None
     update = _first_object(message.get("arguments"))
-    if update is None or update.get("isLastUpdate") is not True:
+    if update is None:
         return None
     bot_messages = [
         item for item in _objects(update.get("messages")) if item.get("author") == "bot"
@@ -212,6 +218,21 @@ def final_text(message: Mapping[str, JsonValue]) -> str | None:
         return None
     text = bot_messages[-1].get("text")
     return text if isinstance(text, str) else None
+
+
+def is_final_update(message: Mapping[str, JsonValue]) -> bool:
+    if message.get("target") != "update":
+        return False
+    update = _first_object(message.get("arguments"))
+    return update is not None and update.get("isLastUpdate") is True
+
+
+def text_delta(current_text: str, previous_text: str) -> str:
+    if not previous_text:
+        return current_text
+    if current_text.startswith(previous_text):
+        return current_text[len(previous_text) :]
+    return current_text
 
 
 def image_artifacts(message: Mapping[str, JsonValue]) -> list[GeneratedImage]:
