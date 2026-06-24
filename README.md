@@ -84,6 +84,12 @@ Microsoft 365 Copilot:
 python -m copilot_tools_gateway login m365
 ```
 
+Refresh an existing Microsoft 365 Copilot browser-backed session:
+
+```bash
+python -m copilot_tools_gateway refresh m365
+```
+
 Sessions are stored under `session/`, which is ignored by Git. Do not commit or
 share session files.
 
@@ -149,8 +155,6 @@ you need a specific account family.
 ## Safety And Privacy
 
 - Runtime sessions, cookies, and tokens stay under `session/`.
-- Logs must not contain prompts, cookies, tokens, browser storage, or full
-  provider payloads.
 - AI-generated content is private by default.
 - Public APIs return normalized gateway data, not raw vendor payloads.
 

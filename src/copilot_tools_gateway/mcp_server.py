@@ -2,7 +2,7 @@
 
 from copilot_tools_gateway.app_factory import build_registry
 from copilot_tools_gateway.domain.errors import GatewayError
-from copilot_tools_gateway.domain.models import ProviderId, VisionInput
+from copilot_tools_gateway.domain.models import FileChatInput, ProviderId, VisionInput
 
 
 def run_mcp_server() -> None:
@@ -71,6 +71,25 @@ def run_mcp_server() -> None:
         try:
             provider = registry.resolve(model)
             result = provider.describe_image(VisionInput(prompt=prompt, image_path=image_path))
+        except GatewayError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {
+            "ok": True,
+            "provider": result.provider_id.value,
+            "conversation_id": result.conversation_id,
+            "text": result.text,
+        }
+
+    @server.tool()
+    def copilot_chat_with_files(
+        file_paths: list[str],
+        prompt: str,
+        model: str = ProviderId.AUTO.value,
+    ) -> dict[str, object]:
+        """Ask Copilot to answer using one or more local files as attachments."""
+        try:
+            provider = registry.resolve(model)
+            result = provider.chat_with_files(FileChatInput(prompt=prompt, file_paths=file_paths))
         except GatewayError as exc:
             return {"ok": False, "error": str(exc)}
         return {

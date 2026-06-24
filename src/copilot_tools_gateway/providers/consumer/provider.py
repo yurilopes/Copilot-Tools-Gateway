@@ -6,6 +6,7 @@ from pathlib import Path
 from copilot_tools_gateway.domain.errors import UnsupportedCapabilityError
 from copilot_tools_gateway.domain.models import (
     ChatResult,
+    FileChatInput,
     GeneratedImage,
     ProviderCapabilities,
     ProviderId,
@@ -24,6 +25,7 @@ class ConsumerProvider:
         streaming=True,
         image_generation=True,
         vision=True,
+        file_chat=False,
         conversation_resume=True,
     )
 
@@ -88,6 +90,9 @@ class ConsumerProvider:
             "If the provider cannot access the file directly, explain that limitation."
         )
         return self.chat(prompt)
+
+    def chat_with_files(self, request: FileChatInput) -> ChatResult:
+        raise UnsupportedCapabilityError("Consumer provider file chat is not implemented yet")
 
     def _run(
         self,

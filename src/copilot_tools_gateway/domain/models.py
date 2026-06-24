@@ -16,6 +16,7 @@ class ProviderCapabilities:
     streaming: bool
     image_generation: bool
     vision: bool
+    file_chat: bool
     conversation_resume: bool
 
 
@@ -55,6 +56,12 @@ class GeneratedImage:
 class VisionInput:
     prompt: str
     image_path: str
+
+
+@dataclass(frozen=True)
+class FileChatInput:
+    prompt: str
+    file_paths: list[str]
 
 
 def provider_model_ids() -> list[str]:

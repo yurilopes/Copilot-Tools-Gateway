@@ -5,7 +5,7 @@ import os
 
 import uvicorn
 
-from copilot_tools_gateway.login import login_consumer, login_m365
+from copilot_tools_gateway.login import login_consumer, login_m365, refresh_m365
 from copilot_tools_gateway.mcp_server import run_mcp_server
 from copilot_tools_gateway.settings import GatewayPaths
 
@@ -16,6 +16,9 @@ def main() -> None:
 
     login_parser = subcommands.add_parser("login", help="Create or refresh a provider session")
     login_parser.add_argument("provider", choices=["consumer", "m365"])
+
+    refresh_parser = subcommands.add_parser("refresh", help="Refresh an existing provider session")
+    refresh_parser.add_argument("provider", choices=["m365"])
 
     api_parser = subcommands.add_parser("api", help="Run the local HTTP API")
     api_parser.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
@@ -28,6 +31,12 @@ def main() -> None:
         paths = GatewayPaths.from_cwd()
         path = login_consumer(paths) if args.provider == "consumer" else login_m365(paths)
         print(f"Session saved to {path}")
+        return
+
+    if args.command == "refresh":
+        paths = GatewayPaths.from_cwd()
+        path = refresh_m365(paths)
+        print(f"Session refreshed under {path.parent}")
         return
 
     if args.command == "api":

@@ -5,6 +5,7 @@ from typing import Protocol
 
 from copilot_tools_gateway.domain.models import (
     ChatResult,
+    FileChatInput,
     GeneratedImage,
     ProviderCapabilities,
     ProviderId,
@@ -32,3 +33,6 @@ class CopilotProvider(Protocol):
 
     def describe_image(self, request: VisionInput) -> ChatResult:
         """Ask the provider to interpret an image."""
+
+    def chat_with_files(self, request: FileChatInput) -> ChatResult:
+        """Ask the provider to answer using local files as attachments."""

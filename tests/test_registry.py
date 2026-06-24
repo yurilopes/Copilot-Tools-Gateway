@@ -6,6 +6,7 @@ import pytest
 from copilot_tools_gateway.domain.errors import ProviderUnavailableError, UnsupportedCapabilityError
 from copilot_tools_gateway.domain.models import (
     ChatResult,
+    FileChatInput,
     GeneratedImage,
     ProviderCapabilities,
     ProviderId,
@@ -26,6 +27,7 @@ class FakeProvider:
         streaming=True,
         image_generation=False,
         vision=False,
+        file_chat=False,
         conversation_resume=False,
     )
 
@@ -52,6 +54,9 @@ class FakeProvider:
         raise UnsupportedCapabilityError("not supported")
 
     def describe_image(self, request: VisionInput) -> ChatResult:
+        raise UnsupportedCapabilityError("not supported")
+
+    def chat_with_files(self, request: FileChatInput) -> ChatResult:
         raise UnsupportedCapabilityError("not supported")
 
 

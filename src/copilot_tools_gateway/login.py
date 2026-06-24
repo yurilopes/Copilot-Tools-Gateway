@@ -12,9 +12,13 @@ from playwright.sync_api import Page
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from copilot_tools_gateway.domain.errors import LoginFailedError
-from copilot_tools_gateway.domain.json_types import object_value
+from copilot_tools_gateway.domain.json_types import object_value, string_value
 from copilot_tools_gateway.providers.consumer.auth import ConsumerAuth
 from copilot_tools_gateway.providers.m365.auth import M365Session
+from copilot_tools_gateway.providers.m365.tokens import (
+    M365CapturedTokenKind,
+    classify_m365_access_token,
+)
 from copilot_tools_gateway.settings import GatewayPaths
 
 CONSUMER_URL = "https://copilot.microsoft.com/"
@@ -126,47 +130,85 @@ def _evaluate_consumer_token(page: Page) -> object:
 
 
 def login_m365(paths: GatewayPaths) -> Path:
+    return _capture_m365_session(
+        paths,
+        prompt=(
+            "Sign in to Microsoft 365 Copilot, open chat, send a message "
+            "or attach a file if Graph tools are needed, then press Enter here: "
+        ),
+    )
+
+
+def refresh_m365(paths: GatewayPaths) -> Path:
+    return _capture_m365_session(
+        paths,
+        prompt=(
+            "Use the opened Microsoft 365 Copilot page if action is needed. "
+            "Send a message or attach a file if Graph tools are needed, then press Enter here: "
+        ),
+    )
+
+
+def _capture_m365_session(paths: GatewayPaths, prompt: str) -> Path:
     from playwright.sync_api import sync_playwright
 
     candidates: list[M365Session] = []
-    token_request_urls: set[str] = set()
-    profile_dir = paths.session_dir / "m365" / "profile"
-    profile_dir.mkdir(parents=True, exist_ok=True)
+    graph_tokens: list[str] = []
+    search_tokens: list[str] = []
+    paths.m365_profile_dir.mkdir(parents=True, exist_ok=True)
 
     def inspect_response(response: object) -> None:
         url = getattr(response, "url", "")
         if not isinstance(url, str):
             return
         if "/oauth2/v2.0/token" in url:
-            token_request_urls.add(url)
-            _append_session_from_response(response, candidates)
+            _append_tokens_from_oauth_response(response, candidates, graph_tokens, search_tokens)
         if "/m365Copilot/Chathub/" in url:
-            _append_session_from_websocket_url(url, candidates)
+            _append_chathub_session_from_websocket_url(url, candidates)
 
     def inspect_websocket(websocket: object) -> None:
         url = getattr(websocket, "url", "")
         if isinstance(url, str) and "/m365Copilot/Chathub/" in url:
-            _append_session_from_websocket_url(url, candidates)
+            _append_chathub_session_from_websocket_url(url, candidates)
+
+    def inspect_request(request: object) -> None:
+        url = getattr(request, "url", "")
+        if not isinstance(url, str):
+            return
+        if "graph.microsoft.com" in url:
+            _append_bearer_token_from_request(request, graph_tokens, M365CapturedTokenKind.GRAPH)
+        if "substrate.office.com/searchservice" in url:
+            _append_bearer_token_from_request(request, search_tokens, M365CapturedTokenKind.SEARCH)
 
     with sync_playwright() as playwright:
         context = playwright.chromium.launch_persistent_context(
-            user_data_dir=str(profile_dir),
+            user_data_dir=str(paths.m365_profile_dir),
             headless=False,
             args=["--disable-blink-features=AutomationControlled"],
         )
         try:
             page = context.pages[0] if context.pages else context.new_page()
             page.on("response", inspect_response)
+            page.on("request", inspect_request)
             page.on("websocket", inspect_websocket)
             page.goto(M365_URL, wait_until="domcontentloaded")
-            input("Sign in to Microsoft 365 Copilot, open chat, then press Enter here: ")
-            if not candidates:
+            page.wait_for_timeout(5_000)
+            if not candidates or not graph_tokens or not search_tokens:
+                page.reload(wait_until="domcontentloaded")
+                page.wait_for_timeout(5_000)
+            if not candidates or not graph_tokens or not search_tokens:
+                input(prompt)
+            if not candidates or not graph_tokens or not search_tokens:
                 page.reload(wait_until="domcontentloaded")
                 page.wait_for_timeout(5_000)
             if not candidates:
                 raise LoginFailedError("M365 login did not capture a valid Copilot chat token")
             session = max(candidates, key=lambda item: item.expires_at)
             session.save(paths.m365_token_file)
+            if graph_tokens:
+                paths.m365_graph_token_file.write_text(graph_tokens[-1], encoding="utf-8")
+            if search_tokens:
+                paths.m365_search_token_file.write_text(search_tokens[-1], encoding="utf-8")
             return paths.m365_token_file
         finally:
             context.close()
@@ -179,7 +221,12 @@ def _cookie_is_microsoft(cookie: object) -> bool:
     return isinstance(domain, str) and "microsoft.com" in domain
 
 
-def _append_session_from_response(response: object, candidates: list[M365Session]) -> None:
+def _append_tokens_from_oauth_response(
+    response: object,
+    candidates: list[M365Session],
+    graph_tokens: list[str],
+    search_tokens: list[str],
+) -> None:
     try:
         text_method = getattr(response, "text", None)
         if not callable(text_method):
@@ -188,18 +235,61 @@ def _append_session_from_response(response: object, candidates: list[M365Session
         if not isinstance(body_text, str):
             return
         payload = object_value(json.loads(body_text), "token response")
-        candidates.append(M365Session.from_token_response(payload))
+        _append_classified_token(
+            string_value(payload.get("access_token"), "access_token"),
+            candidates,
+            graph_tokens,
+            search_tokens,
+        )
     except Exception:
         return
 
 
-def _append_session_from_websocket_url(url: str, candidates: list[M365Session]) -> None:
+def _append_chathub_session_from_websocket_url(url: str, candidates: list[M365Session]) -> None:
     values = parse_qs(urlsplit(url).query)
     tokens = values.get("access_token")
     if not tokens:
         return
-    token = tokens[0]
-    try:
-        candidates.append(M365Session.from_access_token(token))
-    except ValueError:
+    captured = classify_m365_access_token(tokens[0])
+    if captured is None or captured.session is None:
         return
+    candidates.append(captured.session)
+
+
+def _append_bearer_token_from_request(
+    request: object,
+    tokens: list[str],
+    expected_kind: M365CapturedTokenKind,
+) -> None:
+    header_method = getattr(request, "header_value", None)
+    if not callable(header_method):
+        return
+    header_value = header_method("authorization")
+    if not isinstance(header_value, str):
+        return
+    prefix = "Bearer "
+    if not header_value.startswith(prefix):
+        return
+    token = header_value.removeprefix(prefix)
+    captured = classify_m365_access_token(token)
+    if captured is not None and captured.kind == expected_kind:
+        tokens.append(token)
+
+
+def _append_classified_token(
+    token: str,
+    candidates: list[M365Session],
+    graph_tokens: list[str],
+    search_tokens: list[str],
+) -> None:
+    captured = classify_m365_access_token(token)
+    if captured is None:
+        return
+    if captured.kind == M365CapturedTokenKind.CHATHUB and captured.session is not None:
+        candidates.append(captured.session)
+        return
+    if captured.kind == M365CapturedTokenKind.GRAPH:
+        graph_tokens.append(captured.token)
+        return
+    if captured.kind == M365CapturedTokenKind.SEARCH:
+        search_tokens.append(captured.token)

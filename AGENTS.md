@@ -23,9 +23,6 @@ English.
 - Never run destructive actions unless they are necessary, explicit, and safe.
 - Never revert someone else's changes unless the user explicitly asks for it.
 - Preserve UTF-8 in code and text files.
-- Never copy secrets, credentials, keys, tokens, sensitive endpoints, unsafe
-  patterns, session files, cookies, browser storage, or generated private data
-  from other projects.
 - Treat AI-generated content as private by default.
 - Do not weaken Ruff, mypy, Pyright, LSP, lint, typecheck, tests, or equivalent
   validators to hide a problem.
@@ -127,8 +124,7 @@ Code comments must be in English, short, and explain only:
 Do not narrate obvious code.
 
 Logs must be useful for operations and safe by default. Log events, transitions,
-and safe internal identifiers. Do not log full payloads, tokens, cookies, storage,
-secrets, documents, sensitive content, full prompts, or full JavaScript.
+and safe internal identifiers.
 
 ## Expected Code Style
 
