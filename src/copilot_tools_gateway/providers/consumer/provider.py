@@ -36,8 +36,9 @@ class ConsumerProvider:
 
     def status(self) -> ProviderStatus:
         try:
-            ConsumerAuth.load(self._auth_file)
+            auth = ConsumerAuth.load(self._auth_file)
         except Exception as exc:
+            command = ["python", "-m", "copilot_tools_gateway", "login", "consumer"]
             return ProviderStatus(
                 provider_id=self.provider_id,
                 configured=self._auth_file.exists(),
@@ -45,6 +46,19 @@ class ConsumerProvider:
                 label=self.label,
                 capabilities=self.capabilities,
                 detail=str(exc),
+                recommended_action="login_session",
+                recommended_command=command,
+            )
+        if auth.expired:
+            return ProviderStatus(
+                provider_id=self.provider_id,
+                configured=True,
+                available=False,
+                label=self.label,
+                capabilities=self.capabilities,
+                detail="Consumer session is stale",
+                recommended_action="login_session",
+                recommended_command=["python", "-m", "copilot_tools_gateway", "login", "consumer"],
             )
         return ProviderStatus(
             provider_id=self.provider_id,
@@ -101,7 +115,9 @@ class ConsumerProvider:
     ) -> Iterator[str | GeneratedImage | ConsumerConversation]:
         auth = ConsumerAuth.load(self._auth_file)
         if auth.expired:
-            raise UnsupportedCapabilityError("Consumer session is stale. Run login again.")
+            raise UnsupportedCapabilityError(
+                "Consumer session is stale. Run: python -m copilot_tools_gateway login consumer"
+            )
         yield from self._driver.create_completion(
             prompt=prompt,
             cookies=auth.cookies,

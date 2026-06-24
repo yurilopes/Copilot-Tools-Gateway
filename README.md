@@ -19,6 +19,7 @@ vision-style image interpretation when the signed-in account supports them.
   - `copilot_chat`
   - `copilot_generate_image`
   - `copilot_vision`
+  - `copilot_chat_with_files`
 - An OpenAI-compatible HTTP surface for simple local interoperability:
   - `GET /v1/models`
   - `POST /v1/chat/completions`
@@ -117,6 +118,36 @@ Example MCP client configuration:
 Use the same command in OpenCode, Codex, Claude Desktop, or another MCP client
 that accepts stdio MCP servers. If the client runs outside the repository,
 replace `python` with the absolute path to the virtual environment interpreter.
+
+### Agent Login And Refresh Flow
+
+Login and refresh are CLI operations, not MCP tools. Agents should use
+`copilot_status` before relying on a provider. When a provider is unavailable,
+the status response includes `recommended_action` and `recommended_command`
+fields when the gateway knows the next safe local command.
+
+Typical M365 first login:
+
+```bash
+python -m copilot_tools_gateway login m365
+```
+
+Typical M365 refresh after an expired browser-backed session:
+
+```bash
+python -m copilot_tools_gateway refresh m365
+```
+
+Typical consumer login or stale consumer session recovery:
+
+```bash
+python -m copilot_tools_gateway login consumer
+```
+
+An agent with local terminal access can run the recommended command, wait for
+the user to complete any browser sign-in step, call `copilot_status` again, and
+then retry the original MCP tool call. MCP tool errors also include the
+recommended command text when provider resolution can identify one.
 
 ## HTTP API Usage
 

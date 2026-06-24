@@ -20,6 +20,7 @@ from copilot_tools_gateway.providers.registry import ProviderRegistry
 class FakeProvider:
     provider_id: ProviderId
     available: bool
+    recommended_command: list[str] | None = None
 
     label = "Fake"
     capabilities = ProviderCapabilities(
@@ -38,6 +39,9 @@ class FakeProvider:
             available=self.available,
             label=self.label,
             capabilities=self.capabilities,
+            detail="fake unavailable" if not self.available else None,
+            recommended_action="login_session" if self.recommended_command else None,
+            recommended_command=self.recommended_command,
         )
 
     def chat(self, prompt: str, conversation_id: str | None = None) -> ChatResult:
@@ -91,3 +95,42 @@ def test_explicit_unavailable_provider_fails() -> None:
 
     with pytest.raises(ProviderUnavailableError):
         registry.resolve("m365-copilot")
+
+
+def test_explicit_unavailable_provider_includes_recommended_command() -> None:
+    registry = ProviderRegistry(
+        [
+            FakeProvider(
+                ProviderId.M365,
+                available=False,
+                recommended_command=["python", "-m", "copilot_tools_gateway", "login", "m365"],
+            )
+        ]
+    )
+
+    with pytest.raises(ProviderUnavailableError) as exc_info:
+        registry.resolve("m365-copilot")
+
+    assert "Run: python -m copilot_tools_gateway login m365" in str(exc_info.value)
+
+
+def test_auto_unavailable_provider_includes_first_recommended_command() -> None:
+    registry = ProviderRegistry(
+        [
+            FakeProvider(
+                ProviderId.M365,
+                available=False,
+                recommended_command=["python", "-m", "copilot_tools_gateway", "refresh", "m365"],
+            ),
+            FakeProvider(
+                ProviderId.CONSUMER,
+                available=False,
+                recommended_command=["python", "-m", "copilot_tools_gateway", "login", "consumer"],
+            ),
+        ]
+    )
+
+    with pytest.raises(ProviderUnavailableError) as exc_info:
+        registry.resolve("copilot-auto")
+
+    assert "Run: python -m copilot_tools_gateway refresh m365" in str(exc_info.value)

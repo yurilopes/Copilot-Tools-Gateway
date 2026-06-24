@@ -28,6 +28,8 @@ class ProviderStatus:
     label: str
     capabilities: ProviderCapabilities
     detail: str | None = None
+    recommended_action: str | None = None
+    recommended_command: list[str] | None = None
 
 
 @dataclass(frozen=True)

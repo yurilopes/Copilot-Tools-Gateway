@@ -23,6 +23,8 @@ def run_mcp_server() -> None:
                     "available": status.available,
                     "label": status.label,
                     "detail": status.detail,
+                    "recommended_action": status.recommended_action,
+                    "recommended_command": status.recommended_command,
                     "capabilities": status.capabilities.__dict__,
                 }
             )

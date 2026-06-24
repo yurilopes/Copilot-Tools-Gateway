@@ -13,6 +13,7 @@ from websockets.typing import Origin
 
 from copilot_tools_gateway.domain.errors import (
     ProviderUnavailableError,
+    SessionExpiredError,
     UnsupportedCapabilityError,
     UpstreamProtocolError,
 )
@@ -97,9 +98,22 @@ class M365Provider:
                 label=self.label,
                 capabilities=self.capabilities,
                 detail="M365 session file was not found",
+                recommended_action="login_session",
+                recommended_command=["python", "-m", "copilot_tools_gateway", "login", "m365"],
             )
         try:
             M365Session.load(self._token_file)
+        except SessionExpiredError as exc:
+            return ProviderStatus(
+                provider_id=self.provider_id,
+                configured=True,
+                available=False,
+                label=self.label,
+                capabilities=self.capabilities,
+                detail=str(exc),
+                recommended_action="refresh_session",
+                recommended_command=["python", "-m", "copilot_tools_gateway", "refresh", "m365"],
+            )
         except Exception as exc:
             return ProviderStatus(
                 provider_id=self.provider_id,
@@ -108,6 +122,8 @@ class M365Provider:
                 label=self.label,
                 capabilities=self.capabilities,
                 detail=str(exc),
+                recommended_action="login_session",
+                recommended_command=["python", "-m", "copilot_tools_gateway", "login", "m365"],
             )
         return ProviderStatus(
             provider_id=self.provider_id,
@@ -148,28 +164,36 @@ class M365Provider:
     def _load_graph_token(self) -> str:
         if self._graph_token_file is None or not self._graph_token_file.exists():
             raise ProviderUnavailableError(
-                "M365 Graph token is not configured. Run refresh m365."
+                "M365 Graph token is not configured. Run: python -m copilot_tools_gateway "
+                "refresh m365"
             )
         token = self._graph_token_file.read_text(encoding="utf-8").strip()
         if not token:
-            raise ProviderUnavailableError("M365 Graph token is empty. Run refresh m365.")
+            raise ProviderUnavailableError(
+                "M365 Graph token is empty. Run: python -m copilot_tools_gateway refresh m365"
+            )
         if not graph_token_is_valid(token):
             raise ProviderUnavailableError(
-                "M365 Graph token is invalid or expired. Run refresh m365."
+                "M365 Graph token is invalid or expired. Run: python -m "
+                "copilot_tools_gateway refresh m365"
             )
         return token
 
     def _load_search_token(self) -> str:
         if self._search_token_file is None or not self._search_token_file.exists():
             raise ProviderUnavailableError(
-                "M365 search token is not configured. Run refresh m365."
+                "M365 search token is not configured. Run: python -m copilot_tools_gateway "
+                "refresh m365"
             )
         token = self._search_token_file.read_text(encoding="utf-8").strip()
         if not token:
-            raise ProviderUnavailableError("M365 search token is empty. Run refresh m365.")
+            raise ProviderUnavailableError(
+                "M365 search token is empty. Run: python -m copilot_tools_gateway refresh m365"
+            )
         if not search_token_is_valid(token):
             raise ProviderUnavailableError(
-                "M365 search token is invalid or expired. Run refresh m365."
+                "M365 search token is invalid or expired. Run: python -m "
+                "copilot_tools_gateway refresh m365"
             )
         return token
 

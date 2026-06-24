@@ -24,15 +24,27 @@ class ProviderRegistry:
         status = provider.status()
         if not status.available:
             detail = f": {status.detail}" if status.detail else ""
-            raise ProviderUnavailableError(f"Provider {provider_id.value} is unavailable{detail}")
+            run = _recommended_command_text(status.recommended_command)
+            raise ProviderUnavailableError(
+                f"Provider {provider_id.value} is unavailable{detail}{run}"
+            )
         return provider
 
     def _resolve_auto(self) -> CopilotProvider:
+        first_unavailable: ProviderStatus | None = None
         for provider_id in (ProviderId.M365, ProviderId.CONSUMER):
             provider = self._providers.get(provider_id)
-            if provider is not None and provider.status().available:
+            if provider is None:
+                continue
+            status = provider.status()
+            if status.available:
                 return provider
-        raise ProviderUnavailableError("No configured Copilot provider is available")
+            if first_unavailable is None:
+                first_unavailable = status
+        run = _recommended_command_text(
+            first_unavailable.recommended_command if first_unavailable is not None else None
+        )
+        raise ProviderUnavailableError(f"No configured Copilot provider is available{run}")
 
     @staticmethod
     def _normalize_model(model: str | ProviderId | None) -> ProviderId:
@@ -44,3 +56,9 @@ class ProviderRegistry:
             return ProviderId(model)
         except ValueError as exc:
             raise ProviderUnavailableError(f"Unknown model: {model}") from exc
+
+
+def _recommended_command_text(command: list[str] | None) -> str:
+    if command is None:
+        return ""
+    return f". Run: {' '.join(command)}"
