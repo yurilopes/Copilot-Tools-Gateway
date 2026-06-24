@@ -16,6 +16,13 @@ from copilot_tools_gateway.domain.models import (
 from copilot_tools_gateway.providers.consumer.auth import ConsumerAuth
 from copilot_tools_gateway.providers.consumer.driver import ConsumerConversation, ConsumerDriver
 
+CONSUMER_REFRESH_COMMAND = ["python", "-m", "copilot_tools_gateway", "refresh", "consumer"]
+CONSUMER_STALE_SESSION_MESSAGE = (
+    "Consumer session is stale. Run: python -m copilot_tools_gateway refresh consumer. "
+    "Complete any browser challenge, send a normal browser message, wait for Copilot "
+    "to answer, then retry the original request."
+)
+
 
 class ConsumerProvider:
     provider_id = ProviderId.CONSUMER
@@ -25,7 +32,7 @@ class ConsumerProvider:
         streaming=True,
         image_generation=True,
         vision=True,
-        file_chat=False,
+        file_chat=True,
         conversation_resume=True,
     )
 
@@ -57,8 +64,8 @@ class ConsumerProvider:
                 label=self.label,
                 capabilities=self.capabilities,
                 detail="Consumer session is stale",
-                recommended_action="login_session",
-                recommended_command=["python", "-m", "copilot_tools_gateway", "login", "consumer"],
+                recommended_action="refresh_session",
+                recommended_command=CONSUMER_REFRESH_COMMAND,
             )
         return ProviderStatus(
             provider_id=self.provider_id,
@@ -98,30 +105,52 @@ class ConsumerProvider:
         return images
 
     def describe_image(self, request: VisionInput) -> ChatResult:
-        prompt = (
-            f"{request.prompt}\n\n"
-            f"Image path available to the local gateway: {request.image_path}\n"
-            "If the provider cannot access the file directly, explain that limitation."
+        return self.chat_with_files(
+            FileChatInput(prompt=request.prompt, file_paths=[request.image_path])
         )
-        return self.chat(prompt)
 
     def chat_with_files(self, request: FileChatInput) -> ChatResult:
-        raise UnsupportedCapabilityError("Consumer provider file chat is not implemented yet")
+        if not request.file_paths:
+            raise UnsupportedCapabilityError("At least one file path is required")
+        paths = [Path(file_path) for file_path in request.file_paths]
+        unsupported = [path for path in paths if not _is_consumer_image_path(path)]
+        if unsupported:
+            names = ", ".join(path.name for path in unsupported)
+            raise UnsupportedCapabilityError(
+                "Consumer provider currently supports image attachments only. "
+                f"Unsupported file attachments: {names}"
+            )
+        text_parts: list[str] = []
+        generated_conversation_id: str | None = None
+        for item in self._run(request.prompt, None, image_paths=paths):
+            if isinstance(item, str):
+                text_parts.append(item)
+            elif isinstance(item, ConsumerConversation):
+                generated_conversation_id = item.conversation_id
+        return ChatResult(
+            text="".join(text_parts),
+            provider_id=self.provider_id,
+            conversation_id=generated_conversation_id,
+        )
 
     def _run(
         self,
         prompt: str,
         conversation_id: str | None,
+        image_paths: list[Path] | None = None,
     ) -> Iterator[str | GeneratedImage | ConsumerConversation]:
         auth = ConsumerAuth.load(self._auth_file)
         if auth.expired:
-            raise UnsupportedCapabilityError(
-                "Consumer session is stale. Run: python -m copilot_tools_gateway login consumer"
-            )
+            raise UnsupportedCapabilityError(CONSUMER_STALE_SESSION_MESSAGE)
         yield from self._driver.create_completion(
             prompt=prompt,
             cookies=auth.cookies,
             access_token=auth.access_token,
             conversation_id=conversation_id,
             timeout_seconds=self._timeout_seconds,
+            image_paths=image_paths,
         )
+
+
+def _is_consumer_image_path(path: Path) -> bool:
+    return path.suffix.lower() in {".jpg", ".jpeg", ".png"}

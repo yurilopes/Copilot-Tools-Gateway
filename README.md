@@ -38,6 +38,19 @@ that behind a common provider contract.
 - Consumer Copilot uses the public Copilot web protocol with cookies, a Copilot
   chat token when signed in, and challenge responses.
 
+Consumer browser-assisted chat is intentionally not part of the main provider
+path right now. The consumer provider keeps using the non-browser WebSocket
+path, with `refresh consumer` as a guided browser warm-up when Copilot requires
+a browser challenge. A browser-assisted provider fallback can be reconsidered if
+the warm-up flow stops restoring WebSocket access reliably.
+
+Consumer image attachments use the consumer `/c/api/attachments` endpoint and
+are supported for PNG and JPEG files. This powers `copilot_vision` with
+`model: copilot` and image-only `copilot_chat_with_files` calls. Consumer
+document attachments such as DOCX are not enabled yet because the observed
+consumer attachment endpoint did not return a usable document URL for the chat
+frame.
+
 Capabilities are explicit. A provider must report whether it supports chat,
 streaming, image generation, vision, and conversation resume. The MCP server uses
 those capabilities to fail clearly instead of pretending unsupported features
@@ -91,6 +104,28 @@ Refresh an existing Microsoft 365 Copilot browser-backed session:
 python -m copilot_tools_gateway refresh m365
 ```
 
+Refresh an existing consumer Copilot browser-backed session:
+
+```bash
+python -m copilot_tools_gateway refresh consumer
+```
+
+Consumer Copilot may require a browser challenge before chat traffic is accepted.
+When that happens, run `refresh consumer`, complete the challenge in the opened
+browser, send a normal message, wait for Copilot to answer, and then retry the
+MCP or HTTP request. The gateway does not synthesize Cloudflare challenge tokens
+in the non-browser WebSocket path.
+
+This warm-up step was validated with a consumer account: after the browser
+challenge was completed and Copilot answered normal browser messages, consumer
+chat over the non-browser WebSocket path worked again without keeping the
+browser open.
+
+The `refresh consumer` command is interactive and guided. It opens the
+persistent browser profile, prints the browser warm-up steps, waits for Enter,
+saves the refreshed local session, and tells the user or agent to retry the
+original MCP or HTTP request.
+
 Sessions are stored under `session/`, which is ignored by Git. Do not commit or
 share session files.
 
@@ -138,16 +173,35 @@ Typical M365 refresh after an expired browser-backed session:
 python -m copilot_tools_gateway refresh m365
 ```
 
-Typical consumer login or stale consumer session recovery:
+Typical consumer first login:
 
 ```bash
 python -m copilot_tools_gateway login consumer
+```
+
+Typical consumer stale session recovery:
+
+```bash
+python -m copilot_tools_gateway refresh consumer
 ```
 
 An agent with local terminal access can run the recommended command, wait for
 the user to complete any browser sign-in step, call `copilot_status` again, and
 then retry the original MCP tool call. MCP tool errors also include the
 recommended command text when provider resolution can identify one.
+
+If an MCP call against `copilot` fails with a browser challenge or
+`chat-service-unavailable`, the LLM should tell the user that Consumer Copilot
+needs a browser warm-up. The LLM should run:
+
+```bash
+python -m copilot_tools_gateway refresh consumer
+```
+
+Then it should ask the user to complete any challenge in the opened browser,
+send one normal message to Copilot, wait for Copilot to answer, and return to
+the agent. After that, the LLM should retry the original MCP tool call. The LLM
+should not ask the user for cookies, tokens, browser storage, or session files.
 
 ## HTTP API Usage
 
@@ -177,7 +231,8 @@ curl http://127.0.0.1:3991/v1/chat/completions \
 
 - `copilot-auto` uses the first available configured provider.
 - `m365-copilot` requires a valid M365 session.
-- `copilot` requires a valid consumer session.
+- `copilot` requires a valid consumer session. It supports image attachments
+  for PNG and JPEG files, but not document attachments.
 
 If both providers are configured, `copilot-auto` prefers M365 by default because
 it usually has broader enterprise capabilities. Use an explicit model name when
@@ -201,3 +256,33 @@ python -m mypy src
 
 The project intentionally uses small modules, explicit provider contracts, and
 strict typing. See `AGENTS.md` and `code-style.md` before changing architecture.
+
+## Diagnostics
+
+Optional diagnostic tools live under `tools/diagnostics/`. They are not part of
+normal MCP or HTTP operation.
+
+Consumer WebSocket shape capture:
+
+```bash
+python tools/diagnostics/capture_consumer_websocket_shape.py --seconds 300
+```
+
+This tool requires a local Pydoll checkout and opens the persistent consumer
+browser profile. Use the opened browser normally, including completing browser
+challenges if needed. The output stores only sanitized protocol shape data:
+event names, key names, lengths, booleans, and short hashes. It does not store
+raw payloads, cookies, tokens, browser storage, session files, or raw requests.
+
+Consumer WebSocket health check:
+
+```bash
+python tools/diagnostics/check_consumer_websocket_health.py
+```
+
+This tool sends a fixed consumer Copilot chat prompt through the normal gateway
+provider path and appends a sanitized result to
+`captures/consumer-websocket-health.jsonl`. It records success or failure,
+response length, whether the expected fixed response was returned, and the
+session file age from filesystem metadata. It does not read or print session
+file contents.

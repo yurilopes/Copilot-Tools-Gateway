@@ -5,6 +5,7 @@ import time
 import uuid
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from select import select
 from typing import Protocol
 from urllib.parse import quote
@@ -20,11 +21,18 @@ from copilot_tools_gateway.providers.consumer.challenges import (
     solve_copilot_challenge,
     solve_hashcash,
 )
+from copilot_tools_gateway.providers.consumer.protocol import set_options_frame
+from copilot_tools_gateway.providers.consumer.uploads import upload_consumer_images
 
 COPILOT_URL = "https://copilot.microsoft.com"
 CHAT_WEBSOCKET_URL = "wss://copilot.microsoft.com/c/api/chat?api-version=2"
 START_CONVERSATION_URL = f"{COPILOT_URL}/c/api/start"
 SOCKET_BAD = -1
+CONSUMER_BROWSER_CHALLENGE_MESSAGE = (
+    "Consumer Copilot requires a browser challenge. Run: "
+    "python -m copilot_tools_gateway refresh consumer, complete the browser challenge, "
+    "send a message, wait for Copilot to answer, then retry the request."
+)
 
 
 class CurlLike(Protocol):
@@ -65,10 +73,10 @@ class ConsumerDriver:
         access_token: str | None,
         conversation_id: str | None,
         timeout_seconds: int,
+        image_paths: list[Path] | None = None,
     ) -> Iterator[str | GeneratedImage | ConsumerConversation]:
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "CopilotNative/30.0.440505001-prod (Android 14; Google; Pixel 8 Pro)",
             "X-Search-UILang": "en-US",
         }
 
@@ -82,13 +90,34 @@ class ConsumerDriver:
             if conversation_id is None:
                 yield ConsumerConversation(active_conversation_id)
 
+            image_parts = [
+                attachment.to_content_part()
+                for attachment in upload_consumer_images(
+                    session,
+                    image_paths or [],
+                    timeout_seconds,
+                )
+            ]
+            option_frame = json.dumps(
+                set_options_frame(),
+                separators=(",", ":"),
+            ).encode("utf-8")
+            consent_frame = json.dumps(
+                {
+                    "event": "reportLocalConsents",
+                    "grantedConsents": [],
+                },
+                separators=(",", ":"),
+            ).encode("utf-8")
             send_frame = json.dumps(
                 {
                     "event": "send",
                     "conversationId": active_conversation_id,
-                    "content": [{"type": "text", "text": prompt}],
-                    "mode": "chat",
-                }
+                    "content": [*image_parts, {"type": "text", "text": prompt}],
+                    "mode": "smart",
+                    "context": {},
+                },
+                separators=(",", ":"),
             ).encode("utf-8")
             try:
                 websocket = session.ws_connect(
@@ -102,6 +131,8 @@ class ConsumerDriver:
                     _websocket_url(None),
                     headers={"Origin": COPILOT_URL},
                 )
+            websocket.send(option_frame, CurlWsFlag.TEXT)
+            websocket.send(consent_frame, CurlWsFlag.TEXT)
             websocket.send(send_frame, CurlWsFlag.TEXT)
             yield from self._read_stream(websocket, send_frame, timeout_seconds)
 
@@ -160,6 +191,13 @@ class ConsumerDriver:
                 last_event = event if isinstance(event, str) else "unknown"
                 if event == "challenge" and not answered_challenge:
                     token = self._solve_challenge(message)
+                    answered_challenge = True
+                    if not token:
+                        websocket.send(
+                            json.dumps({"event": "ping"}).encode("utf-8"),
+                            CurlWsFlag.TEXT,
+                        )
+                        continue
                     websocket.send(
                         json.dumps(
                             {
@@ -170,7 +208,6 @@ class ConsumerDriver:
                         ).encode("utf-8"),
                         CurlWsFlag.TEXT,
                     )
-                    answered_challenge = True
                     websocket.send(send_frame, CurlWsFlag.TEXT)
                 elif event == "appendText":
                     started = True
@@ -193,12 +230,7 @@ class ConsumerDriver:
                 elif event == "done":
                     return
                 elif event == "error":
-                    error_code = message.get("errorCode")
-                    if isinstance(error_code, str) and error_code:
-                        raise UpstreamProtocolError(
-                            f"Consumer Copilot returned an error event: {error_code}"
-                        )
-                    raise UpstreamProtocolError("Consumer Copilot returned an error event")
+                    raise self._error_event(message)
         if not started:
             raise UpstreamProtocolError("Consumer Copilot did not start streaming")
 
@@ -233,7 +265,20 @@ class ConsumerDriver:
             return solve_hashcash(parameter)
         if method == "copilot" and isinstance(parameter, str):
             return solve_copilot_challenge(parameter)
+        if method == "cloudflare":
+            raise UpstreamProtocolError(CONSUMER_BROWSER_CHALLENGE_MESSAGE)
         raise UpstreamProtocolError("Consumer Copilot returned an unsupported challenge")
+
+    @staticmethod
+    def _error_event(message: Mapping[str, JsonValue]) -> UpstreamProtocolError:
+        error_code = message.get("errorCode")
+        if isinstance(error_code, str) and error_code:
+            if error_code == "chat-service-unavailable":
+                return UpstreamProtocolError(CONSUMER_BROWSER_CHALLENGE_MESSAGE)
+            return UpstreamProtocolError(
+                f"Consumer Copilot returned an error event: {error_code}"
+            )
+        return UpstreamProtocolError("Consumer Copilot returned an error event")
 
     @staticmethod
     def _drain_json(buffer: bytes) -> tuple[list[Mapping[str, JsonValue]], bytes]:
