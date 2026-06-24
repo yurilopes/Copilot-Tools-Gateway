@@ -11,6 +11,7 @@ GRAPH_AUDIENCES = {
     "00000003-0000-0000-c000-000000000000",
 }
 SEARCH_AUDIENCES = {"https://substrate.office.com/search"}
+SEARCH_SCOPES = {"SubstrateSearch-Internal.ReadWrite"}
 
 
 class M365CapturedTokenKind(StrEnum):
@@ -46,7 +47,16 @@ def graph_token_is_valid(token: str, now: int | None = None) -> bool:
 
 
 def search_token_is_valid(token: str, now: int | None = None) -> bool:
-    return _token_audience_is_valid(token, SEARCH_AUDIENCES, now=now)
+    if not _token_audience_is_valid(token, SEARCH_AUDIENCES, now=now):
+        return False
+    try:
+        claims = jwt_payload(token)
+    except (ValueError, TypeError):
+        return False
+    scopes = claims.get("scp")
+    if not isinstance(scopes, str):
+        return False
+    return bool(SEARCH_SCOPES.intersection(scopes.split()))
 
 
 def _token_audience_is_valid(token: str, audiences: set[str], now: int | None = None) -> bool:

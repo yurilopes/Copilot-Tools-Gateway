@@ -21,12 +21,12 @@ from copilot_tools_gateway.providers.m365.protocol import (
 )
 from copilot_tools_gateway.providers.m365.provider import M365Provider
 from copilot_tools_gateway.providers.m365.transport import chat_frame, socket_url
+from copilot_tools_gateway.providers.m365.unfurl import unfurl_document_body
 from copilot_tools_gateway.providers.m365.uploads import (
     M365DocumentAnnotation,
     M365ImageAnnotation,
     _sharepoint_document_id,
     _sharepoint_upload_headers,
-    _unfurl_document_body,
 )
 
 
@@ -178,7 +178,7 @@ def test_sharepoint_upload_headers_request_text_extraction() -> None:
 
 
 def test_unfurl_document_body_uses_local_file_annotation() -> None:
-    body = _unfurl_document_body(
+    body = unfurl_document_body(
         M365DocumentAnnotation(
             doc_id="SPO_doc",
             url="https://example.invalid/doc",

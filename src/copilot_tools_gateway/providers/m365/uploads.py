@@ -6,7 +6,6 @@ import json
 import mimetypes
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -18,7 +17,6 @@ from copilot_tools_gateway.providers.m365.auth import M365Session
 from copilot_tools_gateway.providers.m365.document_diagnostics import document_annotation_url
 
 UPLOAD_URL = "https://substrate.office.com/m365Copilot/UploadFile"
-UNFURL_URL = "https://substrate.office.com/searchservice/api/v1/unfurl?domain=prod"
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 UPLOAD_OPTIONS = [
     "cwcgptvsan",
@@ -96,7 +94,7 @@ def upload_image(
         headers=headers,
         method="POST",
     )
-    payload = _json_request(request, timeout_seconds, "M365 image upload")
+    payload = json_request(request, timeout_seconds, "M365 image upload")
     data = object_value(payload, "M365 upload response")
     doc_id = string_value(data.get("docId"), "docId")
     return M365ImageAnnotation(doc_id=doc_id, file_name=file_name, file_type=file_type)
@@ -125,74 +123,6 @@ def upload_document(
         url=document_annotation_url(item),
         file_name=file_name,
     )
-
-
-def unfurl_document(
-    session: M365Session,
-    search_token: str,
-    annotation: M365DocumentAnnotation,
-    timeout_seconds: float,
-) -> None:
-    body = json.dumps(
-        _unfurl_document_body(annotation),
-        separators=(",", ":"),
-    ).encode("utf-8")
-    headers = {
-        "Accept": "application/json",
-        "Authorization": f"Bearer {search_token}",
-        "Content-Type": "application/json",
-        "Origin": "https://m365.cloud.microsoft",
-        "Referer": "https://m365.cloud.microsoft/chat/",
-        "x-anchormailbox": f"OID:{session.oid}@{session.tid}",
-        "x-routingparameter-sessionkey": f"OID:{session.oid}@{session.tid}",
-        "client-request-id": str(uuid.uuid4()),
-        "client-session-id": str(uuid.uuid4()),
-        "x-client-language": "pt-br",
-        "x-client-localtime": datetime.now().astimezone().isoformat(timespec="milliseconds"),
-    }
-    request = Request(
-        UNFURL_URL,
-        data=body,
-        headers=headers,
-        method="POST",
-    )
-    _json_request(request, timeout_seconds, "M365 document unfurl")
-
-
-def _unfurl_document_body(annotation: M365DocumentAnnotation) -> dict[str, object]:
-    return {
-        "EntityRequests": [
-            {
-                "QueryAnnotations": [
-                    {
-                        "Id": annotation.doc_id,
-                        "Type": "LocalFile",
-                        "Text": annotation.file_name,
-                    }
-                ],
-                "PreferredResultSourceFormat": "EntityData",
-                "SupportedResultSourceFormats": ["EntityData"],
-            }
-        ],
-        "LogicalId": str(uuid.uuid4()),
-        "Cvid": str(uuid.uuid4()),
-        "Scenario": {
-            "Name": "Harmony.Web.Copilot_Drawer",
-            "Dimensions": [
-                {
-                    "DimensionName": "ScenarioDescription",
-                    "DimensionValue": (
-                        "OfficeWebIncludedCopilot.prefetch.getdocumentsummary.fileupload"
-                    ),
-                },
-                {
-                    "DimensionName": "ScenarioType",
-                    "DimensionValue": "PO",
-                },
-            ],
-        },
-        "CacheMode": "FireForget",
-    }
 
 
 def _prepare_document_upload(graph_token: str, timeout_seconds: float) -> None:
@@ -229,7 +159,7 @@ def _create_graph_upload_session(
         },
         method="POST",
     )
-    payload = _json_request(request, timeout_seconds, "Graph upload session")
+    payload = json_request(request, timeout_seconds, "Graph upload session")
     data = object_value(payload, "Graph upload session")
     return string_value(data.get("uploadUrl"), "uploadUrl")
 
@@ -245,7 +175,7 @@ def _upload_graph_file(
         headers=_sharepoint_upload_headers(len(raw_bytes)),
         method="PUT",
     )
-    payload = _json_request(request, timeout_seconds, "Graph file upload")
+    payload = json_request(request, timeout_seconds, "Graph file upload")
     return dict(object_value(payload, "Graph drive item"))
 
 
@@ -270,7 +200,7 @@ def _read_sensitivity_label(
         headers=_graph_headers(graph_token),
         method="GET",
     )
-    _json_request(request, timeout_seconds, "Graph sensitivity label")
+    json_request(request, timeout_seconds, "Graph sensitivity label")
 
 
 def _read_document_metadata(
@@ -289,7 +219,7 @@ def _read_document_metadata(
         headers=_graph_headers(graph_token),
         method="GET",
     )
-    payload = _json_request(request, timeout_seconds, "Graph document metadata")
+    payload = json_request(request, timeout_seconds, "Graph document metadata")
     return dict(object_value(payload, "Graph document metadata"))
 
 
@@ -316,7 +246,7 @@ def _graph_get(
         headers=_graph_headers(graph_token),
         method="GET",
     )
-    return _json_request(request, timeout_seconds, operation)
+    return json_request(request, timeout_seconds, operation)
 
 
 def _graph_headers(graph_token: str) -> dict[str, str]:
@@ -381,7 +311,7 @@ def _base64url_decode(value: str) -> bytes:
         raise UpstreamProtocolError("Graph item id was not valid base64url") from exc
 
 
-def _json_request(request: Request, timeout_seconds: float, operation: str) -> object:
+def json_request(request: Request, timeout_seconds: float, operation: str) -> object:
     try:
         with urlopen(request, timeout=timeout_seconds) as response:
             return json.loads(response.read().decode("utf-8"))

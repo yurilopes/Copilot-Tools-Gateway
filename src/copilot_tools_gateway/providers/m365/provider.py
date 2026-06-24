@@ -40,9 +40,8 @@ from copilot_tools_gateway.providers.m365.protocol import (
 )
 from copilot_tools_gateway.providers.m365.runtime import run_async, run_async_iter
 from copilot_tools_gateway.providers.m365.tokens import graph_token_is_valid, search_token_is_valid
+from copilot_tools_gateway.providers.m365.unfurl import unfurl_document
 from copilot_tools_gateway.providers.m365.uploads import (
-    M365DocumentAnnotation,
-    unfurl_document,
     upload_document,
     upload_image,
 )
@@ -328,7 +327,7 @@ class M365Provider:
                     self._timeout_seconds,
                 )
                 await asyncio.to_thread(
-                    _try_unfurl_document,
+                    unfurl_document,
                     session,
                     search_token,
                     document,
@@ -383,16 +382,3 @@ class M365Provider:
 
 def _is_image_path(path: Path) -> bool:
     return path.suffix.lower() in {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
-
-
-def _try_unfurl_document(
-    session: M365Session,
-    search_token: str,
-    document: M365DocumentAnnotation,
-    timeout_seconds: float,
-) -> bool:
-    try:
-        unfurl_document(session, search_token, document, timeout_seconds)
-    except UpstreamProtocolError:
-        return False
-    return True

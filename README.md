@@ -105,6 +105,12 @@ Refresh an existing Microsoft 365 Copilot browser-backed session:
 python -m copilot_tools_gateway refresh m365
 ```
 
+The M365 refresh command reuses the persistent browser profile and first waits
+for silent Copilot, Graph, and search token traffic. If one of those tokens does
+not appear, it prints safe browser steps and asks the user to send a normal
+message or attach a small document in the opened browser. It reports only safe
+capture state such as whether each token category was seen.
+
 Refresh an existing consumer Copilot browser-backed session:
 
 ```bash
@@ -238,6 +244,10 @@ curl http://127.0.0.1:3991/v1/chat/completions \
 - `m365-copilot` requires a valid M365 session.
 - `m365-copilot` supports real streaming and conversation resume for
   `copilot_chat` through the returned `conversation_id`.
+- `m365-copilot` document attachments require a valid Graph token and search
+  token. The gateway uploads the document through Graph, unfurls the resulting
+  LocalFile annotation through the M365 search service, and fails explicitly if
+  that unfurl step does not complete.
 - `copilot` requires a valid consumer session. It supports image attachments
   for PNG and JPEG files, but not document attachments.
 

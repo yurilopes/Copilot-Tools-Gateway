@@ -5,6 +5,7 @@ from copilot_tools_gateway.providers.m365.tokens import (
     M365CapturedTokenKind,
     classify_m365_access_token,
     graph_token_is_valid,
+    search_token_is_valid,
 )
 
 
@@ -56,6 +57,18 @@ def test_classify_search_token() -> None:
     assert captured is not None
     assert captured.kind == M365CapturedTokenKind.SEARCH
     assert captured.session is None
+
+
+def test_reject_search_token_without_search_scope() -> None:
+    token = _jwt(
+        {
+            "aud": "https://substrate.office.com/search",
+            "exp": 2_000,
+        }
+    )
+
+    assert search_token_is_valid(token, now=1_000) is False
+    assert classify_m365_access_token(token, now=1_000) is None
 
 
 def test_reject_graph_token_without_expiry() -> None:
