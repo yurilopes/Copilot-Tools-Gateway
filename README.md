@@ -1,5 +1,7 @@
 # Copilot Tools Gateway
 
+![Copilot Tools Gateway cover](assets/readme-cover.png)
+
 Copilot Tools Gateway exposes Microsoft Copilot account capabilities as local
 tools for agentic coding assistants. It is designed for OpenCode, Codex, Claude
 Desktop, and other MCP-capable clients that already have their own primary LLM.
