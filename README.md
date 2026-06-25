@@ -1,77 +1,36 @@
 # Copilot Tools Gateway
 
-Copilot Tools Gateway exposes Microsoft Copilot accounts as local tools for
-agentic coding assistants. It is designed for OpenCode, Codex, Claude Desktop,
-and other MCP-capable clients that already have their own primary LLM.
+Copilot Tools Gateway exposes Microsoft Copilot account capabilities as local
+tools for agentic coding assistants. It is designed for OpenCode, Codex, Claude
+Desktop, and other MCP-capable clients that already have their own primary LLM.
 
-This project is not intended to replace a selectable coding model. It provides
-tool calls for auxiliary Copilot tasks such as chat, image generation, and
-vision-style image interpretation when the signed-in account supports them.
+This project is not a selectable coding model. It provides auxiliary Copilot
+tools for chat, image generation, image analysis, and file-assisted questions
+when the signed-in account supports those capabilities.
 
 > Unofficial project. This repository is not affiliated with Microsoft. It uses
 > your own Microsoft account session locally. Use it responsibly and follow the
 > service terms that apply to your account.
 
-## What It Provides
+## Quickstart
 
-- MCP tools for agentic clients:
-  - `copilot_status`
-  - `copilot_chat`
-  - `copilot_generate_image`
-  - `copilot_vision`
-  - `copilot_chat_with_files`
-- An OpenAI-compatible HTTP surface for simple local interoperability:
-  - `GET /v1/models`
-  - `POST /v1/chat/completions`
-  - `POST /v1/images/generations`
-- Provider routing for two Copilot account families:
-  - `m365-copilot` for Microsoft 365 Copilot accounts.
-  - `copilot` for consumer Microsoft Copilot accounts.
-  - `copilot-auto` to choose a valid configured provider automatically.
-
-## Current Design
-
-The two account families use different upstream protocols. The gateway hides
-that behind a common provider contract.
-
-- Microsoft 365 Copilot uses the M365 chat service over SignalR WebSocket and
-  streams chat text from incremental update events when the upstream sends them.
-- Consumer Copilot uses the public Copilot web protocol with cookies, a Copilot
-  chat token when signed in, and challenge responses.
-
-Consumer browser-assisted chat is intentionally not part of the main provider
-path right now. The consumer provider keeps using the non-browser WebSocket
-path, with `refresh consumer` as a guided browser warm-up when Copilot requires
-a browser challenge. A browser-assisted provider fallback can be reconsidered if
-the warm-up flow stops restoring WebSocket access reliably.
-
-Consumer image attachments use the consumer `/c/api/attachments` endpoint and
-are supported for PNG and JPEG files. This powers `copilot_vision` with
-`model: copilot` and image-only `copilot_chat_with_files` calls. Consumer
-document attachments such as DOCX are not enabled yet because the observed
-consumer attachment endpoint did not return a usable document URL for the chat
-frame.
-
-Capabilities are explicit. A provider must report whether it supports chat,
-streaming, image generation, vision, and conversation resume. The MCP server uses
-those capabilities to fail clearly instead of pretending unsupported features
-exist.
-
-## Requirements
+Requirements:
 
 - Python 3.11 or newer.
 - Windows, macOS, or Linux.
 - A Microsoft account with access to the Copilot surface you want to use.
 
-Install dependencies:
+Clone the repository and enter it:
 
 ```bash
-python -m venv .venv
+git clone <repository-url>
+cd Copilot-Tools-Gateway
 ```
 
 Windows PowerShell:
 
 ```powershell
+python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev,mcp]"
 python -m playwright install chromium
@@ -80,63 +39,23 @@ python -m playwright install chromium
 Unix shells:
 
 ```bash
+python -m venv .venv
 . .venv/bin/activate
 python -m pip install -e ".[dev,mcp]"
 python -m playwright install chromium
 ```
 
-## Login
-
-Consumer Copilot:
-
-```bash
-python -m copilot_tools_gateway login consumer
-```
-
-Microsoft 365 Copilot:
+Create at least one provider session:
 
 ```bash
 python -m copilot_tools_gateway login m365
 ```
 
-Refresh an existing Microsoft 365 Copilot browser-backed session:
+or:
 
 ```bash
-python -m copilot_tools_gateway refresh m365
+python -m copilot_tools_gateway login consumer
 ```
-
-The M365 refresh command reuses the persistent browser profile and first waits
-for silent Copilot, Graph, and search token traffic. If one of those tokens does
-not appear, it prints safe browser steps and asks the user to send a normal
-message or attach a small document in the opened browser. It reports only safe
-capture state such as whether each token category was seen.
-
-Refresh an existing consumer Copilot browser-backed session:
-
-```bash
-python -m copilot_tools_gateway refresh consumer
-```
-
-Consumer Copilot may require a browser challenge before chat traffic is accepted.
-When that happens, run `refresh consumer`, complete the challenge in the opened
-browser, send a normal message, wait for Copilot to answer, and then retry the
-MCP or HTTP request. The gateway does not synthesize Cloudflare challenge tokens
-in the non-browser WebSocket path.
-
-This warm-up step was validated with a consumer account: after the browser
-challenge was completed and Copilot answered normal browser messages, consumer
-chat over the non-browser WebSocket path worked again without keeping the
-browser open.
-
-The `refresh consumer` command is interactive and guided. It opens the
-persistent browser profile, prints the browser warm-up steps, waits for Enter,
-saves the refreshed local session, and tells the user or agent to retry the
-original MCP or HTTP request.
-
-Sessions are stored under `session/`, which is ignored by Git. Do not commit or
-share session files.
-
-## MCP Usage
 
 Run the MCP server over stdio:
 
@@ -144,7 +63,18 @@ Run the MCP server over stdio:
 python -m copilot_tools_gateway mcp
 ```
 
-Example MCP client configuration:
+The installed script is also available after installation:
+
+```bash
+copilot-tools-gateway mcp
+```
+
+Use `python -m copilot_tools_gateway ...` in examples when you want the most
+portable local command from the repository checkout.
+
+## MCP Client Setup
+
+Add this stdio server to your MCP client configuration:
 
 ```json
 {
@@ -157,64 +87,130 @@ Example MCP client configuration:
 }
 ```
 
-Use the same command in OpenCode, Codex, Claude Desktop, or another MCP client
-that accepts stdio MCP servers. If the client runs outside the repository,
-replace `python` with the absolute path to the virtual environment interpreter.
+If the client runs outside this repository or virtual environment, replace
+`python` with the absolute path to the environment interpreter.
 
-`copilot_chat` returns a `conversation_id` when the upstream provider supports
-conversation resume. Pass that id back as the optional `conversation_id`
-argument to continue the same upstream conversation.
+See [docs/mcp.md](docs/mcp.md) for the complete MCP reference, tool schemas,
+response envelope, provider limitations, and agent recovery guidance.
 
-### Agent Login And Refresh Flow
+## What It Provides
 
-Login and refresh are CLI operations, not MCP tools. Agents should use
-`copilot_status` before relying on a provider. When a provider is unavailable,
-the status response includes `recommended_action` and `recommended_command`
-fields when the gateway knows the next safe local command.
+MCP tools:
 
-Typical M365 first login:
+- `copilot_status`
+- `copilot_chat`
+- `copilot_generate_image`
+- `copilot_vision`
+- `copilot_chat_with_files`
+
+OpenAI-compatible HTTP compatibility surface:
+
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+- `POST /v1/images/generations`
+
+Provider models:
+
+- `copilot-auto` chooses a valid configured provider automatically.
+- `m365-copilot` uses Microsoft 365 Copilot.
+- `copilot` uses consumer Microsoft Copilot.
+
+MCP is the primary integration surface. The HTTP API exists for simple local
+compatibility.
+
+## Choose Your Provider
+
+Use `copilot-auto` by default. It prefers M365 when both providers are
+available because M365 usually has broader file and enterprise capabilities.
+
+Use `m365-copilot` when you need Microsoft 365 Copilot, document attachments,
+Graph-backed file access, or M365 conversation behavior.
+
+Use `copilot` when you want the consumer Microsoft Copilot account. Consumer
+Copilot supports chat, image generation, and PNG or JPEG image attachments. It
+does not support document attachments through this gateway yet.
+
+## Login And Refresh
+
+Login and refresh are CLI operations, not MCP tools. MCP tools return
+agent-friendly recovery instructions when a provider needs login, refresh, or a
+browser warm-up.
+
+M365 login:
 
 ```bash
 python -m copilot_tools_gateway login m365
 ```
 
-Typical M365 refresh after an expired browser-backed session:
+M365 refresh:
 
 ```bash
 python -m copilot_tools_gateway refresh m365
 ```
 
-Typical consumer first login:
+The M365 refresh command reuses the persistent browser profile and waits for
+safe capture signals for Copilot, Graph, and search access. If document access
+does not refresh silently, it asks the user to complete safe browser steps such
+as sending a normal message or attaching a small document.
+
+Consumer login:
 
 ```bash
 python -m copilot_tools_gateway login consumer
 ```
 
-Typical consumer stale session recovery:
+Consumer refresh and browser warm-up:
 
 ```bash
 python -m copilot_tools_gateway refresh consumer
 ```
 
-An agent with local terminal access can run the recommended command, wait for
-the user to complete any browser sign-in step, call `copilot_status` again, and
-then retry the original MCP tool call. MCP tool errors also include the
-recommended command text when provider resolution can identify one.
+Consumer Copilot may require a browser challenge before non-browser WebSocket
+chat is accepted. When that happens, run `refresh consumer`, complete any
+challenge in the opened browser, send one normal Copilot message, wait for the
+answer, and retry the original MCP or HTTP request.
 
-If an MCP call against `copilot` fails with a browser challenge or
-`chat-service-unavailable`, the LLM should tell the user that Consumer Copilot
-needs a browser warm-up. The LLM should run:
+Sessions are stored under `session/`, which is ignored by Git. Do not commit or
+share session files.
 
-```bash
-python -m copilot_tools_gateway refresh consumer
+## Quick Smoke Checks
+
+Check provider status through an MCP client by calling:
+
+```text
+copilot_status
 ```
 
-Then it should ask the user to complete any challenge in the opened browser,
-send one normal message to Copilot, wait for Copilot to answer, and return to
-the agent. After that, the LLM should retry the original MCP tool call. The LLM
-should not ask the user for cookies, tokens, browser storage, or session files.
+Ask for simple chat:
 
-## HTTP API Usage
+```json
+{
+  "prompt": "Say hello in one short sentence.",
+  "model": "copilot-auto"
+}
+```
+
+Analyze an image with consumer Copilot:
+
+```json
+{
+  "image_path": "C:\\path\\to\\image.png",
+  "prompt": "Describe the image.",
+  "model": "copilot"
+}
+```
+
+Ask about a document with M365 Copilot:
+
+```json
+{
+  "file_paths": ["C:\\path\\to\\document.docx"],
+  "prompt": "Summarize this document and quote its validation marker.",
+  "model": "m365-copilot"
+}
+```
+
+## HTTP API
 
 Start the local API:
 
@@ -238,58 +234,10 @@ curl http://127.0.0.1:3991/v1/chat/completions \
   -d "{\"model\":\"copilot-auto\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hello in one short sentence.\"}]}"
 ```
 
-## Model Routing
-
-- `copilot-auto` uses the first available configured provider.
-- `m365-copilot` requires a valid M365 session.
-- `m365-copilot` supports real streaming and conversation resume for
-  `copilot_chat` through the returned `conversation_id`.
-- `m365-copilot` document attachments require a valid Graph token and search
-  token. The gateway uploads the document through Graph, unfurls the resulting
-  LocalFile annotation through the M365 search service, and fails explicitly if
-  that unfurl step does not complete.
-- `copilot` requires a valid consumer session. It supports image attachments
-  for PNG and JPEG files, but not document attachments.
-
-If both providers are configured, `copilot-auto` prefers M365 by default because
-it usually has broader enterprise capabilities. Use an explicit model name when
-you need a specific account family.
-
-## Safety And Privacy
-
-- Runtime sessions, cookies, and tokens stay under `session/`.
-- AI-generated content is private by default.
-- Public APIs return normalized gateway data, not raw vendor payloads.
-
-## Development
-
-Run focused checks with explicit timeouts:
-
-```bash
-python -m pytest tests
-python -m ruff check .
-python -m mypy src
-```
-
-The project intentionally uses small modules, explicit provider contracts, and
-strict typing. See `AGENTS.md` and `code-style.md` before changing architecture.
-
 ## Diagnostics
 
-Optional diagnostic tools live under `tools/diagnostics/`. They are not part of
+Optional diagnostics live under `tools/diagnostics/`. They are not part of
 normal MCP or HTTP operation.
-
-Consumer WebSocket shape capture:
-
-```bash
-python tools/diagnostics/capture_consumer_websocket_shape.py --seconds 300
-```
-
-This tool requires a local Pydoll checkout and opens the persistent consumer
-browser profile. Use the opened browser normally, including completing browser
-challenges if needed. The output stores only sanitized protocol shape data:
-event names, key names, lengths, booleans, and short hashes. It does not store
-raw payloads, cookies, tokens, browser storage, session files, or raw requests.
 
 Consumer WebSocket health check:
 
@@ -297,9 +245,40 @@ Consumer WebSocket health check:
 python tools/diagnostics/check_consumer_websocket_health.py
 ```
 
-This tool sends a fixed consumer Copilot chat prompt through the normal gateway
-provider path and appends a sanitized result to
-`captures/consumer-websocket-health.jsonl`. It records success or failure,
-response length, whether the expected fixed response was returned, and the
-session file age from filesystem metadata. It does not read or print session
-file contents.
+M365 attachment matrix check:
+
+```bash
+python tools/diagnostics/check_m365_attachment_matrix.py
+```
+
+Generate validation files without calling MCP:
+
+```bash
+python tools/diagnostics/check_m365_attachment_matrix.py --generate-only
+```
+
+Diagnostics append sanitized operational results under `captures/`. They must
+not store tokens, cookies, browser storage, raw requests, raw responses, or
+session file contents.
+
+## Safety And Privacy
+
+- Runtime sessions, cookies, and tokens stay under `session/`.
+- AI-generated content is private by default.
+- Public APIs return normalized gateway data, not raw vendor payloads.
+- MCP diagnostics contain safe operational metadata only.
+- Agents should never ask users to paste cookies, tokens, browser storage,
+  session files, or raw upstream requests.
+
+## Development
+
+Run checks with explicit timeouts in your automation:
+
+```bash
+python -m pytest tests
+python -m ruff check src tests tools/diagnostics
+python -m mypy src
+```
+
+The project uses small modules, explicit provider contracts, and strict typing.
+See `AGENTS.md` and `code-style.md` before changing architecture.
