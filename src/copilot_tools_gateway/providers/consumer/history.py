@@ -1,5 +1,6 @@
 """Consumer Copilot conversation history."""
 
+import time
 from collections.abc import Mapping
 from typing import Protocol
 from urllib.parse import urljoin, urlsplit
@@ -11,6 +12,9 @@ from copilot_tools_gateway.domain.models import ConversationListResult, Conversa
 
 COPILOT_URL = "https://copilot.microsoft.com"
 CONVERSATIONS_URL = f"{COPILOT_URL}/c/api/conversations"
+CONSUMER_HISTORY_ATTEMPTS = 2
+CONSUMER_HISTORY_RETRY_DELAY_SECONDS = 1.0
+CONSUMER_HISTORY_RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 class ConsumerHistorySession(Protocol):
@@ -39,7 +43,12 @@ def list_consumer_conversations(
         cookies=cookies,
         headers=headers,
     ) as session:
-        return fetch_consumer_conversations(session, limit=limit, cursor=cursor)
+        return fetch_consumer_conversations(
+            session,
+            limit=limit,
+            cursor=cursor,
+            retry_delay_seconds=CONSUMER_HISTORY_RETRY_DELAY_SECONDS,
+        )
 
 
 def fetch_consumer_conversations(
@@ -47,13 +56,30 @@ def fetch_consumer_conversations(
     *,
     limit: int,
     cursor: str | None,
+    retry_delay_seconds: float = 0.0,
 ) -> ConversationListResult:
+    for attempt_index in range(CONSUMER_HISTORY_ATTEMPTS):
+        result = _fetch_consumer_conversations_once(session, limit, cursor)
+        if isinstance(result, ConversationListResult):
+            return result
+        if _should_retry_history_status(result, attempt_index):
+            _sleep_before_retry(retry_delay_seconds)
+            continue
+        raise UpstreamProtocolError(f"Consumer conversation history failed: {result}")
+    raise UpstreamProtocolError("Consumer conversation history retry was exhausted")
+
+
+def _fetch_consumer_conversations_once(
+    session: ConsumerHistorySession,
+    limit: int,
+    cursor: str | None,
+) -> ConversationListResult | int:
     response = session.get(_history_url(cursor))
     status_code = getattr(response, "status_code", 0)
     if not isinstance(status_code, int):
         raise UpstreamProtocolError("Consumer conversation history status was not an integer")
     if status_code >= 400:
-        raise UpstreamProtocolError(f"Consumer conversation history failed: {status_code}")
+        return status_code
     payload = _response_json(response)
     if not isinstance(payload, Mapping):
         raise UpstreamProtocolError("Consumer conversation history response was not an object")
@@ -68,6 +94,18 @@ def fetch_consumer_conversations(
         has_more=next_cursor is not None,
         next_cursor=next_cursor,
     )
+
+
+def _should_retry_history_status(status_code: int, attempt_index: int) -> bool:
+    return (
+        status_code in CONSUMER_HISTORY_RETRY_STATUS_CODES
+        and attempt_index + 1 < CONSUMER_HISTORY_ATTEMPTS
+    )
+
+
+def _sleep_before_retry(delay_seconds: float) -> None:
+    if delay_seconds > 0:
+        time.sleep(delay_seconds)
 
 
 def _history_url(cursor: str | None) -> str:

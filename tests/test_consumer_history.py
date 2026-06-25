@@ -14,13 +14,23 @@ class FakeResponse:
 
 
 class FakeSession:
-    def __init__(self, payload: object, status_code: int = 200) -> None:
+    def __init__(
+        self,
+        payload: object,
+        status_code: int = 200,
+        status_codes: list[int] | None = None,
+    ) -> None:
         self.payload = payload
         self.status_code = status_code
+        self.status_codes = status_codes or []
         self.url: str | None = None
+        self.urls: list[str] = []
 
     def get(self, url: str) -> FakeResponse:
         self.url = url
+        self.urls.append(url)
+        if self.status_codes:
+            return FakeResponse(self.payload, self.status_codes.pop(0))
         return FakeResponse(self.payload, self.status_code)
 
 
@@ -64,6 +74,26 @@ def test_consumer_history_bounds_returned_items() -> None:
 
     assert result.count == 1
     assert result.conversations[0].conversation_id == "conversation-1"
+
+
+def test_consumer_history_retries_recoverable_failure() -> None:
+    session = FakeSession(
+        {
+            "results": [{"id": "conversation-1", "title": "One"}],
+            "next": None,
+        },
+        status_codes=[503, 200],
+    )
+
+    result = fetch_consumer_conversations(
+        session,
+        limit=20,
+        cursor=None,
+        retry_delay_seconds=0.0,
+    )
+
+    assert result.count == 1
+    assert len(session.urls) == 2
 
 
 def test_consumer_history_rejects_external_cursor() -> None:

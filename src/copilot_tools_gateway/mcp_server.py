@@ -42,6 +42,7 @@ def run_mcp_server() -> None:
         intentionally excludes snippets, prompts, responses, and raw provider
         payloads. Pass a returned conversation_id to chat, vision, or file tools.
         """
+        provider: CopilotProvider | None = None
         try:
             provider = _resolve_conversation_listing_provider(registry, model)
             if not provider.capabilities.conversation_listing:
@@ -55,6 +56,7 @@ def run_mcp_server() -> None:
                 model_requested=model,
                 exc=exc,
                 statuses=registry.list_statuses(),
+                provider=provider.provider_id if provider is not None else None,
             )
         return mcp_success(
             tool="copilot_list_conversations",
@@ -295,6 +297,7 @@ def _resolve_conversation_listing_provider(
         if provider is None or not provider.capabilities.conversation_listing:
             continue
         status = provider.status()
-        if status.available:
+        capability_status = status.capability_status or {}
+        if status.available and capability_status.get("conversation_listing", "ready") == "ready":
             return provider
     return registry.resolve(model)

@@ -221,6 +221,12 @@ Check provider status through an MCP client by calling:
 copilot_status
 ```
 
+Run safe local health checks from the terminal:
+
+```bash
+python -m copilot_tools_gateway doctor
+```
+
 List resumable conversations:
 
 ```json
@@ -323,6 +329,12 @@ Conversation list protocol check:
 python tools/diagnostics/check_conversation_list_protocol.py
 ```
 
+MCP smoke check through stdio:
+
+```bash
+python tools/diagnostics/check_mcp_smoke.py
+```
+
 For M365 sidebar discovery, add `--m365-ui`. If the persistent browser profile is
 not signed in, the sanitized result includes a `recommended_action` telling the
 operator to sign in and rerun the diagnostic.
@@ -340,6 +352,22 @@ python tools/diagnostics/check_m365_attachment_matrix.py --generate-only
 Diagnostics append sanitized operational results under `captures/`. They must
 not store tokens, cookies, browser storage, raw requests, raw responses, or
 session file contents.
+
+## Known Limitations
+
+- The project uses unofficial Copilot web protocols that can change without
+  notice.
+- Login and refresh are CLI flows, not MCP tools.
+- M365 document attachments require an eligible Microsoft 365 Copilot or Office
+  365 account plus refreshed Graph and search access.
+- M365 conversation listing returns the initial sidebar page and local
+  pagination for that page. Remote scroll pagination is not validated yet.
+- Consumer document attachments are not supported. Use `m365-copilot` for
+  documents.
+- Consumer Copilot can require browser warm-up before non-browser WebSocket
+  requests are accepted.
+- Diagnostics are sanitized by design and should not include prompts, answers,
+  session files, cookies, tokens, browser storage, or raw upstream traffic.
 
 ## Safety And Privacy
 

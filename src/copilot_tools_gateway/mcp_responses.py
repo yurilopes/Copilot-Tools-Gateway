@@ -171,6 +171,7 @@ def _status_dict(status: ProviderStatus) -> dict[str, object]:
         "detail": sanitize_text(status.detail),
         "recommended_action": status.recommended_action,
         "recommended_command": status.recommended_command,
+        "capability_status": status.capability_status or _default_capability_status(status),
         "capabilities": {
             "chat": status.capabilities.chat,
             "streaming": status.capabilities.streaming,
@@ -181,6 +182,22 @@ def _status_dict(status: ProviderStatus) -> dict[str, object]:
             "conversation_listing": status.capabilities.conversation_listing,
         },
     }
+
+
+def _default_capability_status(status: ProviderStatus) -> dict[str, str]:
+    readiness = "ready" if status.available else "unavailable"
+    values: dict[str, str] = {}
+    for name, supported in (
+        ("chat", status.capabilities.chat),
+        ("streaming", status.capabilities.streaming),
+        ("image_generation", status.capabilities.image_generation),
+        ("vision", status.capabilities.vision),
+        ("file_chat", status.capabilities.file_chat),
+        ("conversation_resume", status.capabilities.conversation_resume),
+        ("conversation_listing", status.capabilities.conversation_listing),
+    ):
+        values[name] = readiness if supported else "unsupported"
+    return values
 
 
 def _file_extensions(file_paths: list[str]) -> list[str]:

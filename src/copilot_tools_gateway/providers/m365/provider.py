@@ -27,6 +27,7 @@ from copilot_tools_gateway.domain.models import (
 )
 from copilot_tools_gateway.providers.m365 import transport as m365_transport
 from copilot_tools_gateway.providers.m365.auth import M365Session
+from copilot_tools_gateway.providers.m365.capability_status import m365_capability_status
 from copilot_tools_gateway.providers.m365.conversations import M365Conversations
 from copilot_tools_gateway.providers.m365.file_chat import chat_with_files
 from copilot_tools_gateway.providers.m365.history import list_m365_conversations
@@ -100,6 +101,7 @@ class M365Provider:
                 detail="M365 session file was not found",
                 recommended_action="login_session",
                 recommended_command=["python", "-m", "copilot_tools_gateway", "login", "m365"],
+                capability_status=m365_capability_status("login_required", False, False),
             )
         try:
             M365Session.load(self._token_file)
@@ -113,6 +115,7 @@ class M365Provider:
                 detail=str(exc),
                 recommended_action="refresh_session",
                 recommended_command=["python", "-m", "copilot_tools_gateway", "refresh", "m365"],
+                capability_status=m365_capability_status("needs_refresh", False, False),
             )
         except Exception as exc:
             return ProviderStatus(
@@ -124,13 +127,17 @@ class M365Provider:
                 detail=str(exc),
                 recommended_action="login_session",
                 recommended_command=["python", "-m", "copilot_tools_gateway", "login", "m365"],
+                capability_status=m365_capability_status("login_required", False, False),
             )
+        documents_ready = self._document_access_ready()
+        history_ready = self._conversation_listing_ready()
         return ProviderStatus(
             provider_id=self.provider_id,
             configured=True,
             available=True,
             label=self.label,
             capabilities=self.capabilities,
+            capability_status=m365_capability_status("ready", documents_ready, history_ready),
         )
 
     def chat(self, prompt: str, conversation_id: str | None = None) -> ChatResult:
@@ -216,6 +223,21 @@ class M365Provider:
         if self._web_auth_file is None:
             raise ProviderUnavailableError("M365 web session is missing or expired")
         return M365WebAuth.load(self._web_auth_file)
+
+    def _document_access_ready(self) -> bool:
+        try:
+            self._load_graph_token()
+            self._load_search_token()
+        except ProviderUnavailableError:
+            return False
+        return True
+
+    def _conversation_listing_ready(self) -> bool:
+        try:
+            self._load_web_auth()
+        except ProviderUnavailableError:
+            return False
+        return True
 
     async def _chat(self, prompt: str, conversation_id: str | None) -> ChatResult:
         session = self._load_session()

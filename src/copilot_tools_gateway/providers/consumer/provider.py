@@ -82,6 +82,7 @@ class ConsumerProvider:
                 detail=str(exc),
                 recommended_action="login_session",
                 recommended_command=command,
+                capability_status=_consumer_capability_status("login_required"),
             )
         if auth.expired:
             return ProviderStatus(
@@ -93,6 +94,7 @@ class ConsumerProvider:
                 detail="Consumer session is stale",
                 recommended_action="refresh_session",
                 recommended_command=CONSUMER_REFRESH_COMMAND,
+                capability_status=_consumer_capability_status("needs_refresh"),
             )
         return ProviderStatus(
             provider_id=self.provider_id,
@@ -100,6 +102,7 @@ class ConsumerProvider:
             available=True,
             label=self.label,
             capabilities=self.capabilities,
+            capability_status=_consumer_capability_status("ready"),
         )
 
     def chat(self, prompt: str, conversation_id: str | None = None) -> ChatResult:
@@ -314,3 +317,16 @@ class ConsumerProvider:
 
 def _is_consumer_image_path(path: Path) -> bool:
     return path.suffix.lower() in {".jpg", ".jpeg", ".png"}
+
+
+def _consumer_capability_status(readiness: str) -> dict[str, str]:
+    return {
+        "chat": readiness,
+        "streaming": readiness,
+        "image_generation": readiness,
+        "vision": readiness,
+        "file_chat": readiness,
+        "conversation_resume": readiness,
+        "conversation_listing": readiness,
+        "documents": "unsupported",
+    }

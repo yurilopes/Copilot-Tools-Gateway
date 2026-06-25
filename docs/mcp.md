@@ -241,6 +241,26 @@ Agent behavior:
 - If no provider is available, follow the top-level recommendation.
 - Prefer M365 when both providers are available and the user did not specify a
   provider.
+- Inspect `capability_status` when a provider is available but a specific
+  capability needs refresh, such as M365 documents or conversation listing.
+
+### Terminal Health Checks
+
+Use `doctor` for a local safe health summary:
+
+```bash
+python -m copilot_tools_gateway doctor
+```
+
+Use the MCP smoke diagnostic to call the stdio server like a real MCP client:
+
+```bash
+python tools/diagnostics/check_mcp_smoke.py
+```
+
+Both commands print sanitized JSON. They do not print session file contents,
+cookies, tokens, browser storage, raw requests, prompts, answers, or document
+contents.
 
 ### `copilot_list_conversations`
 

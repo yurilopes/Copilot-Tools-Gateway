@@ -33,6 +33,7 @@ class ProviderStatus:
     detail: str | None = None
     recommended_action: str | None = None
     recommended_command: list[str] | None = None
+    capability_status: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)

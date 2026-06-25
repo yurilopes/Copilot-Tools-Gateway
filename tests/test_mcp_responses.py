@@ -267,6 +267,11 @@ def test_status_response_returns_top_level_recommendation() -> None:
         ],
     }
     assert response["agent"]["recommended_action"] == "refresh_session"
+    providers = result["providers"]
+    assert isinstance(providers, list)
+    first_provider = providers[0]
+    assert isinstance(first_provider, dict)
+    assert first_provider["capability_status"]["chat"] == "unavailable"
 
 
 def test_error_response_sanitizes_sensitive_terms() -> None:

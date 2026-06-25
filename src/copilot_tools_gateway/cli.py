@@ -8,8 +8,14 @@ from pathlib import Path
 
 import uvicorn
 
+from copilot_tools_gateway.doctor import print_doctor_report
 from copilot_tools_gateway.domain.errors import GatewayError
-from copilot_tools_gateway.login import login_consumer, login_m365, refresh_consumer, refresh_m365
+from copilot_tools_gateway.login import (
+    login_consumer,
+    login_m365,
+    refresh_consumer,
+    refresh_m365,
+)
 from copilot_tools_gateway.mcp_server import run_mcp_server
 from copilot_tools_gateway.settings import GatewayPaths
 
@@ -29,6 +35,7 @@ def main() -> None:
     api_parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "3991")))
 
     subcommands.add_parser("mcp", help="Run the stdio MCP server")
+    subcommands.add_parser("doctor", help="Run safe local health checks")
     args = parser.parse_args()
 
     if args.command == "login":
@@ -55,6 +62,10 @@ def main() -> None:
 
     if args.command == "mcp":
         run_mcp_server()
+        return
+
+    if args.command == "doctor":
+        print_doctor_report(GatewayPaths.from_cwd())
         return
 
 

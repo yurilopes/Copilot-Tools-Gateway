@@ -23,6 +23,7 @@ class FakeProvider:
     provider_id: ProviderId
     available: bool
     recommended_command: list[str] | None = None
+    capability_status: dict[str, str] | None = None
 
     label = "Fake"
     capabilities = ProviderCapabilities(
@@ -44,6 +45,7 @@ class FakeProvider:
             detail="fake unavailable" if not self.available else None,
             recommended_action="login_session" if self.recommended_command else None,
             recommended_command=self.recommended_command,
+            capability_status=self.capability_status,
         )
 
     def chat(self, prompt: str, conversation_id: str | None = None) -> ChatResult:
@@ -167,6 +169,29 @@ def test_conversation_listing_auto_uses_available_provider_with_capability() -> 
         [
             ListingFakeProvider(ProviderId.M365, available=True, conversation_listing=False),
             ListingFakeProvider(ProviderId.CONSUMER, available=True, conversation_listing=True),
+        ]
+    )
+
+    provider = _resolve_conversation_listing_provider(registry, ProviderId.AUTO.value)
+
+    assert provider.provider_id == ProviderId.CONSUMER
+
+
+def test_conversation_listing_auto_skips_provider_needing_refresh() -> None:
+    registry = ProviderRegistry(
+        [
+            ListingFakeProvider(
+                ProviderId.M365,
+                available=True,
+                conversation_listing=True,
+                capability_status={"conversation_listing": "needs_refresh"},
+            ),
+            ListingFakeProvider(
+                ProviderId.CONSUMER,
+                available=True,
+                conversation_listing=True,
+                capability_status={"conversation_listing": "ready"},
+            ),
         ]
     )
 
