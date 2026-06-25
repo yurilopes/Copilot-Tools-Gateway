@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime
 from urllib.request import Request
 
+from copilot_tools_gateway.domain.errors import UpstreamProtocolError
 from copilot_tools_gateway.providers.m365.auth import M365Session
 from copilot_tools_gateway.providers.m365.uploads import M365DocumentAnnotation, json_request
 
@@ -30,6 +31,19 @@ def unfurl_document(
     json_request(request, timeout_seconds, "M365 document unfurl")
 
 
+def try_unfurl_document(
+    session: M365Session,
+    search_token: str,
+    annotation: M365DocumentAnnotation,
+    timeout_seconds: float,
+) -> bool:
+    try:
+        unfurl_document(session, search_token, annotation, timeout_seconds)
+    except UpstreamProtocolError:
+        return False
+    return True
+
+
 def unfurl_document_body(annotation: M365DocumentAnnotation) -> dict[str, object]:
     return {
         "EntityRequests": [
@@ -39,6 +53,7 @@ def unfurl_document_body(annotation: M365DocumentAnnotation) -> dict[str, object
                         "Id": annotation.doc_id,
                         "Type": "LocalFile",
                         "Text": annotation.file_name,
+                        "Url": annotation.url,
                     }
                 ],
                 "PreferredResultSourceFormat": "EntityData",

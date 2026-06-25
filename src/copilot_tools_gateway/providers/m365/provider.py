@@ -9,12 +9,12 @@ from typing import Protocol
 from websockets.asyncio.client import connect
 from websockets.typing import Origin
 
+from copilot_tools_gateway.async_runtime import run_async, run_async_iter
 from copilot_tools_gateway.domain.errors import (
     ProviderUnavailableError,
     SessionExpiredError,
     UpstreamProtocolError,
 )
-from copilot_tools_gateway.domain.json_types import JsonValue
 from copilot_tools_gateway.domain.models import (
     ChatResult,
     FileChatInput,
@@ -26,6 +26,8 @@ from copilot_tools_gateway.domain.models import (
 )
 from copilot_tools_gateway.providers.m365 import transport as m365_transport
 from copilot_tools_gateway.providers.m365.auth import M365Session
+from copilot_tools_gateway.providers.m365.conversations import M365Conversations
+from copilot_tools_gateway.providers.m365.file_chat import chat_with_files
 from copilot_tools_gateway.providers.m365.protocol import (
     CHAT_ALLOWED_MESSAGE_TYPES,
     CHAT_OPTION_SETS,
@@ -35,14 +37,10 @@ from copilot_tools_gateway.providers.m365.protocol import (
     final_text,
     image_artifacts,
     image_file_annotation,
-    local_file_annotation,
     signalr_handshake,
 )
-from copilot_tools_gateway.providers.m365.runtime import run_async, run_async_iter
 from copilot_tools_gateway.providers.m365.tokens import graph_token_is_valid, search_token_is_valid
-from copilot_tools_gateway.providers.m365.unfurl import unfurl_document
 from copilot_tools_gateway.providers.m365.uploads import (
-    upload_document,
     upload_image,
 )
 
@@ -83,6 +81,7 @@ class M365Provider:
         self._graph_token_file = graph_token_file
         self._search_token_file = search_token_file
         self._timeout_seconds = timeout_seconds
+        self._conversations = M365Conversations()
 
     def status(self) -> ProviderStatus:
         if not self._token_file.exists():
@@ -139,12 +138,19 @@ class M365Provider:
         return images[:count]
 
     def describe_image(self, request: VisionInput) -> ChatResult:
-        text = run_async(self._describe_image(request))
-        return ChatResult(text=text, provider_id=self.provider_id)
+        return run_async(self._describe_image(request))
 
     def chat_with_files(self, request: FileChatInput) -> ChatResult:
-        text = run_async(self._chat_with_files(request))
-        return ChatResult(text=text, provider_id=self.provider_id)
+        return run_async(
+            chat_with_files(
+                request=request,
+                session=self._load_session(),
+                graph_token=self._load_graph_token(),
+                search_token=self._load_search_token(),
+                conversations=self._conversations,
+                timeout_seconds=self._timeout_seconds,
+            )
+        )
 
     def _load_session(self) -> M365Session:
         if not self._token_file.exists():
@@ -189,16 +195,16 @@ class M365Provider:
 
     async def _chat(self, prompt: str, conversation_id: str | None) -> ChatResult:
         session = self._load_session()
+        conversation = self._conversations.prepare_prompt(conversation_id, prompt)
         session_id = str(uuid.uuid4())
-        active_conversation_id = conversation_id or str(uuid.uuid4())
-        url = m365_transport.socket_url(session, session_id, active_conversation_id)
+        url = m365_transport.socket_url(session, session_id, conversation.conversation_id)
         chunks: list[str] = []
         async with asyncio.timeout(self._timeout_seconds):
             async with connect(url, origin=M365_ORIGIN) as socket:
                 await self._handshake(socket)
                 await socket.send(
                     m365_transport.chat_frame(
-                        prompt=prompt,
+                        prompt=conversation.prompt,
                         session_id=session_id,
                         option_sets=CHAT_OPTION_SETS,
                         allowed_message_types=CHAT_ALLOWED_MESSAGE_TYPES,
@@ -206,10 +212,16 @@ class M365Provider:
                 )
                 async for chunk in m365_transport.stream_text_response(socket):
                     chunks.append(chunk)
+                text = "".join(chunks)
+                self._conversations.record_turn(
+                    conversation.conversation_id,
+                    prompt,
+                    text,
+                )
                 return ChatResult(
-                    text="".join(chunks),
+                    text=text,
                     provider_id=self.provider_id,
-                    conversation_id=active_conversation_id,
+                    conversation_id=conversation.conversation_id,
                 )
         raise TimeoutError("M365 Copilot did not return a final update in time")
 
@@ -219,22 +231,29 @@ class M365Provider:
         conversation_id: str | None,
     ) -> AsyncIterator[str]:
         session = self._load_session()
+        conversation = self._conversations.prepare_prompt(conversation_id, prompt)
         session_id = str(uuid.uuid4())
-        active_conversation_id = conversation_id or str(uuid.uuid4())
-        url = m365_transport.socket_url(session, session_id, active_conversation_id)
+        url = m365_transport.socket_url(session, session_id, conversation.conversation_id)
+        chunks: list[str] = []
         async with asyncio.timeout(self._timeout_seconds):
             async with connect(url, origin=M365_ORIGIN) as socket:
                 await self._handshake(socket)
                 await socket.send(
                     m365_transport.chat_frame(
-                        prompt=prompt,
+                        prompt=conversation.prompt,
                         session_id=session_id,
                         option_sets=CHAT_OPTION_SETS,
                         allowed_message_types=CHAT_ALLOWED_MESSAGE_TYPES,
                     )
                 )
                 async for chunk in m365_transport.stream_text_response(socket):
+                    chunks.append(chunk)
                     yield chunk
+                self._conversations.record_turn(
+                    conversation.conversation_id,
+                    prompt,
+                    "".join(chunks),
+                )
                 return
         raise TimeoutError("M365 Copilot did not return a final update in time")
 
@@ -268,8 +287,12 @@ class M365Provider:
             return latest_images
         raise TimeoutError("M365 Copilot did not return a generated image in time")
 
-    async def _describe_image(self, request: VisionInput) -> str:
+    async def _describe_image(self, request: VisionInput) -> ChatResult:
         session = self._load_session()
+        conversation = self._conversations.prepare_prompt(
+            request.conversation_id,
+            request.prompt,
+        )
         session_id = str(uuid.uuid4())
         annotation = await asyncio.to_thread(
             upload_image,
@@ -277,13 +300,13 @@ class M365Provider:
             Path(request.image_path),
             self._timeout_seconds,
         )
-        url = m365_transport.socket_url(session, session_id, str(uuid.uuid4()))
+        url = m365_transport.socket_url(session, session_id, conversation.conversation_id)
         async with asyncio.timeout(self._timeout_seconds):
             async with connect(url, origin=M365_ORIGIN) as socket:
                 await self._handshake(socket)
                 await socket.send(
                     m365_transport.chat_frame(
-                        prompt=request.prompt,
+                        prompt=conversation.prompt,
                         session_id=session_id,
                         option_sets=CHAT_OPTION_SETS,
                         allowed_message_types=CHAT_ALLOWED_MESSAGE_TYPES,
@@ -296,81 +319,19 @@ class M365Provider:
                     for message in decode_signalr(payload):
                         text = final_text(message)
                         if text is not None:
-                            return text
+                            self._conversations.record_turn(
+                                conversation.conversation_id,
+                                request.prompt,
+                                text,
+                            )
+                            return ChatResult(
+                                text=text,
+                                provider_id=self.provider_id,
+                                conversation_id=conversation.conversation_id,
+                            )
                         if message.get("type") == 7:
                             raise UpstreamProtocolError("M365 Copilot closed the connection")
         raise TimeoutError("M365 Copilot did not return a vision response in time")
-
-    async def _chat_with_files(self, request: FileChatInput) -> str:
-        if not request.file_paths:
-            raise ProviderUnavailableError("At least one file path is required")
-        session = self._load_session()
-        graph_token = self._load_graph_token()
-        search_token = self._load_search_token()
-        session_id = str(uuid.uuid4())
-        annotations = []
-        for file_path in request.file_paths:
-            path = Path(file_path)
-            if _is_image_path(path):
-                image = await asyncio.to_thread(
-                    upload_image,
-                    session,
-                    path,
-                    self._timeout_seconds,
-                )
-                annotations.append(image_file_annotation(image))
-            else:
-                document = await asyncio.to_thread(
-                    upload_document,
-                    graph_token,
-                    path,
-                    self._timeout_seconds,
-                )
-                await asyncio.to_thread(
-                    unfurl_document,
-                    session,
-                    search_token,
-                    document,
-                    self._timeout_seconds,
-                )
-                annotations.append(local_file_annotation(document))
-        return await self._chat_with_annotations(
-            session=session,
-            prompt=request.prompt,
-            session_id=session_id,
-            annotations=annotations,
-        )
-
-    async def _chat_with_annotations(
-        self,
-        session: M365Session,
-        prompt: str,
-        session_id: str,
-        annotations: list[dict[str, JsonValue]],
-    ) -> str:
-        url = m365_transport.socket_url(session, session_id, str(uuid.uuid4()))
-        async with asyncio.timeout(self._timeout_seconds):
-            async with connect(url, origin=M365_ORIGIN) as socket:
-                await self._handshake(socket)
-                await socket.send(
-                    m365_transport.chat_frame(
-                        prompt=prompt,
-                        session_id=session_id,
-                        option_sets=IMAGE_OPTION_SETS,
-                        allowed_message_types=IMAGE_ALLOWED_MESSAGE_TYPES,
-                        message_annotations=annotations,
-                    )
-                )
-                async for payload in socket:
-                    if not isinstance(payload, str):
-                        continue
-                    for message in decode_signalr(payload):
-                        text = final_text(message)
-                        if text is not None:
-                            return text
-                        if message.get("type") == 7:
-                            raise UpstreamProtocolError("M365 Copilot closed the connection")
-        raise TimeoutError("M365 Copilot did not return a file chat response in time")
 
     async def _handshake(self, socket: SignalRSocket) -> None:
         await socket.send(signalr_handshake())
@@ -379,6 +340,3 @@ class M365Provider:
             raise UpstreamProtocolError("M365 SignalR handshake returned a non-text frame")
         if not any(message == {} for message in decode_signalr(handshake)):
             raise UpstreamProtocolError("M365 SignalR handshake failed")
-
-def _is_image_path(path: Path) -> bool:
-    return path.suffix.lower() in {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}

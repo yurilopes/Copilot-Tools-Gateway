@@ -222,7 +222,8 @@ def summarize_tool_result(
     content: object,
 ) -> dict[str, object]:
     payload = first_json_object(content)
-    text = payload.get("text")
+    result = payload_result(payload)
+    text = result.get("text")
     error = payload.get("error")
     response_text = text if isinstance(text, str) else ""
     error_text = error if isinstance(error, str) else None
@@ -237,9 +238,14 @@ def summarize_tool_result(
         "response_length": len(response_text),
         "marker_found": marker_found,
         "expected_phrase_found": phrase_found,
-        "conversation_id_present": isinstance(payload.get("conversation_id"), str),
+        "conversation_id_present": isinstance(result.get("conversation_id"), str),
         "error": error_text,
     }
+
+
+def payload_result(payload: dict[str, object]) -> dict[str, object]:
+    result = payload.get("result")
+    return result if isinstance(result, dict) else {}
 
 
 def first_json_object(content: object) -> dict[str, object]:

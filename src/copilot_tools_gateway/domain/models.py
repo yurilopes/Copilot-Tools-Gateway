@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
+from copilot_tools_gateway.domain.json_types import JsonValue
+
 
 class ProviderId(StrEnum):
     AUTO = "copilot-auto"
@@ -43,6 +45,7 @@ class ChatResult:
     text: str
     provider_id: ProviderId
     conversation_id: str | None = None
+    metadata: dict[str, JsonValue] | None = None
 
 
 @dataclass(frozen=True)
@@ -58,12 +61,14 @@ class GeneratedImage:
 class VisionInput:
     prompt: str
     image_path: str
+    conversation_id: str | None = None
 
 
 @dataclass(frozen=True)
 class FileChatInput:
     prompt: str
     file_paths: list[str]
+    conversation_id: str | None = None
 
 
 def provider_model_ids() -> list[str]:

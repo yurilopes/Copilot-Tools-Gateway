@@ -2,7 +2,10 @@ import base64
 
 import pytest
 
-from copilot_tools_gateway.domain.errors import ProviderUnavailableError, UpstreamProtocolError
+from copilot_tools_gateway.domain.errors import (
+    ProviderUnavailableError,
+    UpstreamProtocolError,
+)
 from copilot_tools_gateway.providers.consumer.challenges import solve_hashcash
 from copilot_tools_gateway.providers.consumer.driver import (
     CONSUMER_BROWSER_CHALLENGE_MESSAGE,
@@ -12,6 +15,7 @@ from copilot_tools_gateway.providers.consumer.uploads import (
     ATTACHMENT_URL,
     consumer_image_mime_type,
     upload_consumer_image,
+    validate_attachment_url,
 )
 
 
@@ -19,7 +23,7 @@ class FakeUploadResponse:
     status_code = 200
 
     def json(self) -> dict[str, str]:
-        return {"url": "https://example.invalid/image"}
+        return {"url": "/images/uploaded.png"}
 
 
 class FakeUploadSession:
@@ -100,10 +104,41 @@ def test_consumer_driver_uploads_image_attachment(tmp_path) -> None:
     attachment = upload_consumer_image(session, image_path, timeout_seconds=30)
 
     assert session.url == ATTACHMENT_URL
-    assert session.headers == {"content-type": "image/jpeg"}
+    assert session.headers == {
+        "accept": "application/json, text/plain, */*",
+        "content-type": "image/jpeg",
+        "origin": "https://copilot.microsoft.com",
+        "referer": "https://copilot.microsoft.com/",
+    }
     assert session.data_length == len(b"\xff\xd8payload")
     assert session.timeout == 30
     assert attachment.to_content_part() == {
         "type": "image",
-        "url": "https://example.invalid/image",
+        "url": "/images/uploaded.png",
+        "fileName": "image.jpg",
     }
+
+
+def test_consumer_driver_uploads_image_attachment_with_access_token(tmp_path) -> None:
+    image_path = tmp_path / "image.jpg"
+    image_path.write_bytes(b"\xff\xd8payload")
+    session = FakeUploadSession()
+
+    upload_consumer_image(
+        session,
+        image_path,
+        timeout_seconds=30,
+        access_token="access-token",
+    )
+
+    assert session.headers == {
+        "accept": "application/json, text/plain, */*",
+        "authorization": "Bearer access-token",
+        "content-type": "image/jpeg",
+        "origin": "https://copilot.microsoft.com",
+        "referer": "https://copilot.microsoft.com/",
+    }
+
+
+def test_consumer_attachment_url_accepts_absolute_url() -> None:
+    validate_attachment_url("https://copilot.microsoft.com/images/uploaded.png")

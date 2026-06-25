@@ -3,6 +3,7 @@ import json
 from copilot_tools_gateway.domain.errors import (
     ProviderUnavailableError,
     UnsupportedCapabilityError,
+    UpstreamProtocolError,
 )
 from copilot_tools_gateway.domain.models import ProviderCapabilities, ProviderId, ProviderStatus
 from copilot_tools_gateway.mcp_responses import (
@@ -12,6 +13,7 @@ from copilot_tools_gateway.mcp_responses import (
     mcp_status_response,
     mcp_success,
 )
+from copilot_tools_gateway.mcp_server import _chat_diagnostics
 
 CAPABILITIES = ProviderCapabilities(
     chat=True,
@@ -199,6 +201,47 @@ def test_error_response_sanitizes_sensitive_terms() -> None:
     assert "cookie" not in serialized
     assert "authorization" not in serialized
     assert "browser storage" not in serialized
+
+
+def test_m365_document_unfurl_error_recommends_refresh() -> None:
+    response = mcp_error(
+        tool="copilot_chat_with_files",
+        model_requested=ProviderId.M365.value,
+        exc=UpstreamProtocolError("M365 document unfurl failed with HTTP 400"),
+        statuses=[_status(ProviderId.M365, available=True)],
+    )
+
+    assert response["error"]["code"] == "upstream_protocol_error"
+    assert response["error"]["safe_detail"] == "M365 document access needs refresh."
+    assert response["agent"]["recommended_action"] == "refresh_session"
+    assert response["agent"]["recommended_command"] == [
+        "python",
+        "-m",
+        "copilot_tools_gateway",
+        "refresh",
+        "m365",
+    ]
+    assert response["agent"]["retry_after_action"] is True
+
+
+def test_chat_diagnostics_include_safe_attachment_backend_metadata() -> None:
+    diagnostics = _chat_diagnostics(
+        "The image says CTG_ATTACH_IMAGE_1.",
+        "conversation-1",
+        {
+            "attachment_backend": "direct-websocket",
+            "direct_attempted": True,
+            "fallback_used": False,
+        },
+    )
+
+    assert diagnostics == {
+        "text_length": len("The image says CTG_ATTACH_IMAGE_1."),
+        "conversation_id_present": True,
+        "attachment_backend": "direct-websocket",
+        "direct_attempted": True,
+        "fallback_used": False,
+    }
 
 
 def _status(

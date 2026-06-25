@@ -35,6 +35,7 @@ dependencies = [
   "curl-cffi>=0.15",
   "fastapi>=0.110",
   "playwright>=1.40",
+  "pydoll-python>=2.23",
   "pydantic>=2.6",
   "uvicorn>=0.29",
   "websockets>=12",

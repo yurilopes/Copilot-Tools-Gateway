@@ -21,7 +21,14 @@ from copilot_tools_gateway.providers.consumer.challenges import (
     solve_copilot_challenge,
     solve_hashcash,
 )
-from copilot_tools_gateway.providers.consumer.protocol import set_options_frame
+from copilot_tools_gateway.providers.consumer.message_frames import (
+    DEFAULT_IMAGE_SEND_CANDIDATE,
+    ConsumerImageSendCandidate,
+    encode_frame,
+    encoded_consent_frame,
+    encoded_set_options_frame,
+    send_frames_for_candidate,
+)
 from copilot_tools_gateway.providers.consumer.uploads import upload_consumer_images
 
 COPILOT_URL = "https://copilot.microsoft.com"
@@ -74,6 +81,7 @@ class ConsumerDriver:
         conversation_id: str | None,
         timeout_seconds: int,
         image_paths: list[Path] | None = None,
+        image_send_candidate: ConsumerImageSendCandidate = DEFAULT_IMAGE_SEND_CANDIDATE,
     ) -> Iterator[str | GeneratedImage | ConsumerConversation]:
         headers = {
             "Content-Type": "application/json",
@@ -96,45 +104,48 @@ class ConsumerDriver:
                     session,
                     image_paths or [],
                     timeout_seconds,
+                    access_token=access_token,
                 )
             ]
-            option_frame = json.dumps(
-                set_options_frame(),
-                separators=(",", ":"),
-            ).encode("utf-8")
-            consent_frame = json.dumps(
-                {
-                    "event": "reportLocalConsents",
-                    "grantedConsents": [],
-                },
-                separators=(",", ":"),
-            ).encode("utf-8")
-            send_frame = json.dumps(
-                {
-                    "event": "send",
-                    "conversationId": active_conversation_id,
-                    "content": [*image_parts, {"type": "text", "text": prompt}],
-                    "mode": "smart",
-                    "context": {},
-                },
-                separators=(",", ":"),
-            ).encode("utf-8")
+            option_frame = encoded_set_options_frame()
+            consent_frame = encoded_consent_frame()
+            send_frames = [
+                encode_frame(frame)
+                for frame in send_frames_for_candidate(
+                    conversation_id=active_conversation_id,
+                    prompt=prompt,
+                    image_parts=image_parts,
+                    candidate=image_send_candidate,
+                )
+            ]
             try:
                 websocket = session.ws_connect(
                     _websocket_url(access_token),
                     headers={"Origin": COPILOT_URL},
                 )
-            except CurlError:
+            except CurlError as exc:
                 if access_token is None:
-                    raise
-                websocket = session.ws_connect(
-                    _websocket_url(None),
-                    headers={"Origin": COPILOT_URL},
-                )
+                    raise UpstreamProtocolError(
+                        "Consumer Copilot WebSocket connect failed"
+                    ) from exc
+                try:
+                    websocket = session.ws_connect(
+                        _websocket_url(None),
+                        headers={"Origin": COPILOT_URL},
+                    )
+                except CurlError as fallback_exc:
+                    raise UpstreamProtocolError(
+                        "Consumer Copilot WebSocket connect failed"
+                    ) from fallback_exc
             websocket.send(option_frame, CurlWsFlag.TEXT)
             websocket.send(consent_frame, CurlWsFlag.TEXT)
-            websocket.send(send_frame, CurlWsFlag.TEXT)
-            yield from self._read_stream(websocket, send_frame, timeout_seconds)
+            for index, send_frame in enumerate(send_frames):
+                websocket.send(send_frame, CurlWsFlag.TEXT)
+                if index == len(send_frames) - 1:
+                    yield from self._read_stream(websocket, send_frame, timeout_seconds)
+                else:
+                    for _ in self._read_stream(websocket, send_frame, timeout_seconds):
+                        pass
 
     def _start_conversation(self, session: ConsumerHttpSession) -> str:
         response = session.post(
@@ -249,7 +260,9 @@ class ConsumerDriver:
                     return b"".join(chunks)
             except CurlError as exc:
                 if exc.code != CurlECode.AGAIN:
-                    raise
+                    raise UpstreamProtocolError(
+                        "Consumer Copilot WebSocket receive failed"
+                    ) from exc
                 remaining = deadline - time.time()
                 if remaining <= 0:
                     return None

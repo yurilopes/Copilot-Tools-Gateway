@@ -64,6 +64,14 @@ document access fails after a session has aged, run `refresh m365`.
 Consumer document attachments are not supported. Use `m365-copilot` for
 documents, or limit `copilot` file requests to PNG and JPEG images.
 
+Consumer image analysis tries the direct WebSocket protocol first. If the
+direct protocol returns a recoverable unreadable-image failure, the gateway uses
+Pydoll browser-assisted image chat as an explicit fallback.
+
+Consumer login and refresh use Pydoll with a persistent browser profile. M365
+login and refresh use Playwright because the Microsoft 365 capture flow depends
+on that backend today.
+
 ## Response Envelope
 
 All MCP tools return `mcp-response/v2`:
@@ -104,6 +112,11 @@ Envelope fields:
 
 Diagnostics must not contain tokens, cookies, browser storage, raw requests,
 raw responses, session file contents, or unnecessary user content.
+
+Consumer image diagnostics may include `attachment_backend`,
+`direct_attempted`, and `fallback_used`. These fields are safe operational
+metadata for agents and should not be shown as user-visible content unless the
+user asks for troubleshooting detail.
 
 ## Agent Guidance
 
@@ -252,6 +265,11 @@ Conversation behavior:
   pass that id back to continue the same conversation.
 - If no `conversation_id` is present, treat the response as a completed one-off
   call.
+- The gateway does not persist transcripts to disk. M365 resume keeps a small
+  in-memory context for the current MCP server process so text, image, and file
+  turns can share context when the client passes the same `conversation_id`.
+- Consumer resume uses the upstream Copilot conversation id and also keeps a
+  small in-memory context for the current MCP server process.
 
 ### `copilot_generate_image`
 
@@ -302,6 +320,7 @@ Arguments:
 - `image_path`: local PNG or JPEG path.
 - `prompt`: question about the image.
 - `model`: optional, defaults to `copilot-auto`.
+- `conversation_id`: optional upstream conversation id.
 
 Example:
 
@@ -309,7 +328,8 @@ Example:
 {
   "image_path": "C:\\path\\to\\cat.png",
   "prompt": "Describe the image and mention the main subject.",
-  "model": "copilot"
+  "model": "copilot",
+  "conversation_id": "example-conversation-id"
 }
 ```
 
@@ -326,6 +346,8 @@ Success `result`:
 Provider notes:
 
 - Consumer Copilot supports PNG and JPEG image attachments.
+- Consumer image analysis is direct WebSocket first, with Pydoll
+  browser-assisted fallback for recoverable image protocol failures.
 - M365 Copilot supports image analysis through its file flow.
 
 ### `copilot_chat_with_files`
@@ -337,6 +359,7 @@ Arguments:
 - `file_paths`: list of local file paths.
 - `prompt`: question about the files.
 - `model`: optional, defaults to `copilot-auto`.
+- `conversation_id`: optional upstream conversation id.
 
 M365 document example:
 
@@ -344,7 +367,8 @@ M365 document example:
 {
   "file_paths": ["C:\\path\\to\\report.docx"],
   "prompt": "Summarize the document and list the validation marker.",
-  "model": "m365-copilot"
+  "model": "m365-copilot",
+  "conversation_id": "example-conversation-id"
 }
 ```
 
@@ -354,7 +378,8 @@ Consumer image example:
 {
   "file_paths": ["C:\\path\\to\\photo.jpg"],
   "prompt": "What is visible in this image?",
-  "model": "copilot"
+  "model": "copilot",
+  "conversation_id": "example-conversation-id"
 }
 ```
 
@@ -374,6 +399,8 @@ Attachment modes:
 
 - `image`: all files are PNG or JPEG.
 - `document`: all files are non-image document types.
+- Consumer `image` attachments use the same direct-first and browser-assisted
+  fallback behavior as `copilot_vision`.
 - `mixed`: image and non-image attachments were sent together.
 
 Provider notes:
@@ -421,6 +448,15 @@ Consumer browser warm-up:
 3. Send one normal message to Copilot in the browser.
 4. Wait for Copilot to answer.
 5. Return to the MCP client and retry the original tool call.
+
+Consumer image protocol diagnostic:
+
+```bash
+python tools/diagnostics/check_consumer_image_protocol_v2.py
+```
+
+This diagnostic appends sanitized JSONL under `captures/`. It records only
+derived protocol metadata and direct candidate outcomes.
 
 M365 document refresh:
 

@@ -1,5 +1,6 @@
 """MCP tools for agentic coding clients."""
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from copilot_tools_gateway.app_factory import build_registry
@@ -58,7 +59,7 @@ def run_mcp_server() -> None:
                 capabilities=provider.capabilities,
             ),
             agent=_success_agent("Copilot chat completed.", "Copilot returned a response."),
-            diagnostics=_chat_diagnostics(result.text, result.conversation_id),
+            diagnostics=_chat_diagnostics(result.text, result.conversation_id, result.metadata),
         )
 
     @server.tool()
@@ -100,16 +101,24 @@ def run_mcp_server() -> None:
         image_path: str,
         prompt: str,
         model: str = ProviderId.AUTO.value,
+        conversation_id: str | None = None,
     ) -> dict[str, object]:
         """Ask Copilot to interpret a PNG or JPEG image.
 
         Accepted models are copilot-auto, m365-copilot, and copilot. The
-        consumer provider supports PNG and JPEG image attachments. Returns an
-        MCP response v2 envelope with result.text.
+        consumer provider supports PNG and JPEG image attachments. Pass
+        conversation_id to continue a provider conversation when supported.
+        Returns an MCP response v2 envelope with result.text.
         """
         try:
             provider = registry.resolve(model)
-            result = provider.describe_image(VisionInput(prompt=prompt, image_path=image_path))
+            result = provider.describe_image(
+                VisionInput(
+                    prompt=prompt,
+                    image_path=image_path,
+                    conversation_id=conversation_id,
+                )
+            )
         except GatewayError as exc:
             return mcp_error(
                 tool="copilot_vision",
@@ -128,7 +137,7 @@ def run_mcp_server() -> None:
             provider=result.provider_id,
             result=vision_result,
             agent=_success_agent("Image analysis completed.", "Copilot analyzed the image."),
-            diagnostics=_chat_diagnostics(result.text, result.conversation_id),
+            diagnostics=_chat_diagnostics(result.text, result.conversation_id, result.metadata),
         )
 
     @server.tool()
@@ -136,16 +145,24 @@ def run_mcp_server() -> None:
         file_paths: list[str],
         prompt: str,
         model: str = ProviderId.AUTO.value,
+        conversation_id: str | None = None,
     ) -> dict[str, object]:
         """Ask Copilot to answer using local file attachments.
 
         M365 supports document and image attachments when document access is
         refreshed. Consumer Copilot supports PNG and JPEG image attachments, but
-        not document attachments. Returns an MCP response v2 envelope.
+        not document attachments. Pass conversation_id to continue a provider
+        conversation when supported. Returns an MCP response v2 envelope.
         """
         try:
             provider = registry.resolve(model)
-            result = provider.chat_with_files(FileChatInput(prompt=prompt, file_paths=file_paths))
+            result = provider.chat_with_files(
+                FileChatInput(
+                    prompt=prompt,
+                    file_paths=file_paths,
+                    conversation_id=conversation_id,
+                )
+            )
         except GatewayError as exc:
             return mcp_error(
                 tool="copilot_chat_with_files",
@@ -170,6 +187,7 @@ def run_mcp_server() -> None:
             diagnostics={
                 "file_count": len(file_paths),
                 "attachment_mode": _attachment_mode(file_paths),
+                **(result.metadata or {}),
             },
         )
 
@@ -188,10 +206,15 @@ def _success_agent(summary: str, user_message: str) -> AgentGuidance:
     )
 
 
-def _chat_diagnostics(text: str, conversation_id: str | None) -> dict[str, object]:
+def _chat_diagnostics(
+    text: str,
+    conversation_id: str | None,
+    metadata: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     return {
         "text_length": len(text),
         "conversation_id_present": conversation_id is not None,
+        **(metadata or {}),
     }
 
 

@@ -35,7 +35,6 @@ Windows PowerShell:
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev,mcp]"
-python -m playwright install chromium
 ```
 
 Unix shells:
@@ -44,6 +43,12 @@ Unix shells:
 python -m venv .venv
 . .venv/bin/activate
 python -m pip install -e ".[dev,mcp]"
+```
+
+If you plan to use `m365-copilot`, install the Playwright Chromium browser for
+the Microsoft 365 assisted login flow:
+
+```bash
 python -m playwright install chromium
 ```
 
@@ -133,6 +138,8 @@ Microsoft account.
 
 Use `copilot` when you want the consumer Microsoft Copilot account. Consumer
 Copilot supports chat, image generation, and PNG or JPEG image attachments. It
+tries direct WebSocket image analysis first and uses Pydoll browser-assisted
+image chat as an explicit fallback for recoverable image protocol failures. It
 does not support document attachments through this gateway yet.
 
 ## Login And Refresh
@@ -170,6 +177,10 @@ Consumer refresh and browser warm-up:
 python -m copilot_tools_gateway refresh consumer
 ```
 
+Consumer login and refresh use Pydoll with a persistent Chromium profile. This
+avoids the empty challenge modal behavior that can appear in Playwright-driven
+consumer sessions.
+
 Consumer Copilot may require a browser challenge before non-browser WebSocket
 chat is accepted. When that happens, run `refresh consumer`, complete any
 challenge in the opened browser, send one normal Copilot message, wait for the
@@ -204,6 +215,9 @@ Analyze an image with consumer Copilot:
   "model": "copilot"
 }
 ```
+
+Successful consumer image calls include safe MCP diagnostics such as
+`attachment_backend`, `direct_attempted`, and `fallback_used`.
 
 Ask about a document with M365 Copilot:
 
@@ -250,6 +264,12 @@ Consumer WebSocket health check:
 python tools/diagnostics/check_consumer_websocket_health.py
 ```
 
+Consumer image protocol v2 discovery:
+
+```bash
+python tools/diagnostics/check_consumer_image_protocol_v2.py
+```
+
 M365 attachment matrix check:
 
 ```bash
@@ -280,10 +300,14 @@ session file contents.
 Run checks with explicit timeouts in your automation:
 
 ```bash
-python -m pytest tests
-python -m ruff check src tests tools/diagnostics
-python -m mypy src
+.\.venv\Scripts\python.exe -m pytest tests --basetemp "$env:TEMP\ctg-pytest-full"
+.\.venv\Scripts\python.exe -m ruff check src tests tools/diagnostics
+.\.venv\Scripts\python.exe -m mypy src
 ```
+
+Use the repository virtual environment for validation. The project targets
+Python 3.11 or newer, and local global Python installations may contain stubs
+that do not match the configured mypy target.
 
 The project uses small modules, explicit provider contracts, and strict typing.
 See `AGENTS.md` and `code-style.md` before changing architecture.

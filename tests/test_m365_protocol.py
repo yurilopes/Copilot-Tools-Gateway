@@ -2,6 +2,8 @@ import json
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from urllib.parse import parse_qs, urlsplit
 
+from copilot_tools_gateway.domain.errors import UpstreamProtocolError
+from copilot_tools_gateway.providers.m365 import unfurl as m365_unfurl
 from copilot_tools_gateway.providers.m365.auth import M365Session
 from copilot_tools_gateway.providers.m365.document_diagnostics import (
     document_annotation_url,
@@ -196,8 +198,31 @@ def test_unfurl_document_body_uses_local_file_annotation() -> None:
         "Id": "SPO_doc",
         "Type": "LocalFile",
         "Text": "sample.docx",
+        "Url": "https://example.invalid/doc",
     }
     assert body["CacheMode"] == "FireForget"
+
+
+def test_try_unfurl_document_returns_false_on_upstream_failure(monkeypatch) -> None:
+    def fail_unfurl(*args: object, **kwargs: object) -> None:
+        raise UpstreamProtocolError("M365 document unfurl failed with HTTP 400")
+
+    monkeypatch.setattr(m365_unfurl, "unfurl_document", fail_unfurl)
+    session = M365Session(
+        access_token="token",
+        oid="user",
+        tid="tenant",
+        expires_at=2_000_000_000,
+    )
+    annotation = M365DocumentAnnotation(
+        doc_id="SPO_doc",
+        url="https://example.invalid/doc",
+        file_name="sample.docx",
+    )
+
+    ok = m365_unfurl.try_unfurl_document(session, "search-token", annotation, 10)
+
+    assert ok is False
 
 
 def test_file_chat_protocol_lists_follow_ui_order() -> None:

@@ -2,11 +2,13 @@
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import BrowserContext, Page, Playwright
+from playwright.sync_api import Error as PlaywrightError
 
 from copilot_tools_gateway.domain.errors import LoginFailedError
 from copilot_tools_gateway.domain.json_types import object_value, string_value
@@ -91,6 +93,24 @@ class M365TokenCapture:
         return max(self.sessions, key=lambda item: item.expires_at)
 
 
+@dataclass(frozen=True)
+class M365CaptureHandlers:
+    inspect_response: Callable[[object], None]
+    inspect_request: Callable[[object], None]
+    inspect_websocket: Callable[[object], None]
+
+    def detach_from(self, page: Page) -> None:
+        for event_name, handler in (
+            ("response", self.inspect_response),
+            ("request", self.inspect_request),
+            ("websocket", self.inspect_websocket),
+        ):
+            try:
+                page.remove_listener(event_name, handler)
+            except PlaywrightError:
+                continue
+
+
 def login_m365(paths: GatewayPaths) -> Path:
     return capture_m365_session(
         paths,
@@ -127,9 +147,11 @@ def capture_m365_session(
     paths.m365_profile_dir.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as playwright:
         context = _launch_m365_context(playwright, paths.m365_profile_dir)
+        page: Page | None = None
+        handlers: M365CaptureHandlers | None = None
         try:
             page = context.pages[0] if context.pages else context.new_page()
-            _attach_capture_handlers(page, capture)
+            handlers = _attach_capture_handlers(page, capture)
             page.goto(M365_URL, wait_until="domcontentloaded", timeout=M365_BROWSER_TIMEOUT_MS)
             _wait_for_capture(page, capture, M365_CAPTURE_WAIT_MS)
             if not capture.has_chat_token or not capture.has_document_tokens:
@@ -156,7 +178,9 @@ def capture_m365_session(
                 )
             return paths.m365_token_file
         finally:
-            context.close()
+            if page is not None and handlers is not None:
+                handlers.detach_from(page)
+            _safe_close_context(context)
 
 
 def _launch_m365_context(playwright: Playwright, profile_dir: Path) -> BrowserContext:
@@ -168,7 +192,7 @@ def _launch_m365_context(playwright: Playwright, profile_dir: Path) -> BrowserCo
     )
 
 
-def _attach_capture_handlers(page: Page, capture: M365TokenCapture) -> None:
+def _attach_capture_handlers(page: Page, capture: M365TokenCapture) -> M365CaptureHandlers:
     def inspect_response(response: object) -> None:
         url = getattr(response, "url", "")
         if not isinstance(url, str):
@@ -195,6 +219,11 @@ def _attach_capture_handlers(page: Page, capture: M365TokenCapture) -> None:
     page.on("response", inspect_response)
     page.on("request", inspect_request)
     page.on("websocket", inspect_websocket)
+    return M365CaptureHandlers(
+        inspect_response=inspect_response,
+        inspect_request=inspect_request,
+        inspect_websocket=inspect_websocket,
+    )
 
 
 def _wait_for_capture(page: Page, capture: M365TokenCapture, timeout_ms: int) -> None:
@@ -241,7 +270,7 @@ def _append_tokens_from_oauth_response(response: object, capture: M365TokenCaptu
             return
         payload = object_value(json.loads(body_text), "token response")
         capture.append_token(string_value(payload.get("access_token"), "access_token"))
-    except Exception:
+    except (json.JSONDecodeError, PlaywrightError, ValueError):
         return
 
 
@@ -260,7 +289,10 @@ def _append_bearer_token_from_request(
     header_method = getattr(request, "header_value", None)
     if not callable(header_method):
         return
-    header_value = header_method("authorization")
+    try:
+        header_value = header_method("authorization")
+    except PlaywrightError:
+        return
     if not isinstance(header_value, str):
         return
     prefix = "Bearer "
@@ -270,3 +302,10 @@ def _append_bearer_token_from_request(
     captured = classify_m365_access_token(token)
     if captured is not None and captured.kind == expected_kind:
         capture.append_token(token)
+
+
+def _safe_close_context(context: BrowserContext) -> None:
+    try:
+        context.close()
+    except PlaywrightError:
+        return

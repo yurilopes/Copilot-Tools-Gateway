@@ -58,7 +58,7 @@ def parse_args() -> argparse.Namespace:
         "--pydoll-root",
         type=Path,
         default=DEFAULT_PYDOLL_ROOT,
-        help="Local Pydoll checkout root. Pydoll is optional and not a project dependency.",
+        help="Local Pydoll checkout root used only when pydoll-python is not installed.",
     )
     return parser.parse_args()
 

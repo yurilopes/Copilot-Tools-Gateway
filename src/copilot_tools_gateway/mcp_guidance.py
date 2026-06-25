@@ -89,7 +89,9 @@ def safe_detail(
 ) -> str:
     if code == ERROR_UNKNOWN_MODEL:
         return f"Valid models are: {', '.join(provider_model_ids())}."
-    if code == ERROR_REFRESH_REQUIRED and mentions_m365_document_auth(str(exc)):
+    if code in {ERROR_REFRESH_REQUIRED, ERROR_UPSTREAM_PROTOCOL} and mentions_m365_document_auth(
+        str(exc)
+    ):
         return "M365 document access needs refresh."
     if status is not None and status.detail:
         return sanitize_text(status.detail) or error_message(code)
@@ -116,6 +118,8 @@ def error_agent(
         return _unsupported_capability_agent(model_requested, exc)
     if code == ERROR_UPSTREAM_PROTOCOL and mentions_consumer_challenge(str(exc)):
         return consumer_warmup_agent()
+    if code == ERROR_UPSTREAM_PROTOCOL and mentions_m365_document_auth(str(exc)):
+        return m365_document_refresh_agent()
     if code in {ERROR_LOGIN_REQUIRED, ERROR_PROVIDER_UNAVAILABLE}:
         return _provider_action_agent(status, ACTION_LOGIN_SESSION)
     if code in {ERROR_SESSION_EXPIRED, ERROR_REFRESH_REQUIRED}:
@@ -226,7 +230,12 @@ def mentions_consumer_challenge(detail: str) -> bool:
 
 def mentions_m365_document_auth(detail: str) -> bool:
     lowered = detail.lower()
-    return "graph token" in lowered or "search token" in lowered
+    markers = (
+        "document unfurl",
+        "graph token",
+        "search token",
+    )
+    return any(marker in lowered for marker in markers)
 
 
 def sanitize_text(value: str | None) -> str | None:
@@ -255,6 +264,25 @@ def consumer_warmup_agent() -> AgentGuidance:
             "Run the recommended refresh command.",
             "Complete any browser challenge.",
             "Send one normal message in the browser and wait for Copilot to answer.",
+            "Retry the original MCP tool call.",
+        ],
+    )
+
+
+def m365_document_refresh_agent() -> AgentGuidance:
+    return AgentGuidance(
+        summary="Microsoft 365 document access needs refresh before retrying.",
+        user_message=(
+            "Microsoft 365 document access needs a refresh before this file request can run."
+        ),
+        recommended_action=ACTION_REFRESH_SESSION,
+        recommended_command=["python", "-m", "copilot_tools_gateway", "refresh", "m365"],
+        retryable=True,
+        retry_after_action=True,
+        next_steps=[
+            "Run the recommended refresh command.",
+            "Complete any browser sign-in steps if requested.",
+            "If prompted, attach a small document in the browser and wait for Copilot to answer.",
             "Retry the original MCP tool call.",
         ],
     )
