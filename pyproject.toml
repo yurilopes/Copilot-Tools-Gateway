@@ -10,6 +10,27 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Copilot Tools Gateway contributors" }]
+keywords = [
+  "agentic-coding",
+  "copilot",
+  "mcp",
+  "microsoft-365",
+  "tools",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Framework :: FastAPI",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Software Development",
+]
 dependencies = [
   "curl-cffi>=0.15",
   "fastapi>=0.110",
@@ -28,6 +49,12 @@ dev = [
 mcp = [
   "mcp>=1.2",
 ]
+
+[project.urls]
+Homepage = "https://github.com/yurilopes/Copilot-Tools-Gateway"
+Repository = "https://github.com/yurilopes/Copilot-Tools-Gateway"
+Issues = "https://github.com/yurilopes/Copilot-Tools-Gateway/issues"
+Documentation = "https://github.com/yurilopes/Copilot-Tools-Gateway/blob/main/docs/mcp.md"
 
 [project.scripts]
 copilot-tools-gateway = "copilot_tools_gateway.cli:main"
