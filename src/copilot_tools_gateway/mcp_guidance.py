@@ -18,6 +18,7 @@ ACTION_BROWSER_WARMUP = "browser_warmup"
 ACTION_RETRY = "retry"
 ACTION_USE_DIFFERENT_PROVIDER = "use_different_provider"
 ACTION_UNSUPPORTED_CAPABILITY = "unsupported_capability"
+ACTION_RUN_DIAGNOSTIC = "run_diagnostic"
 
 ERROR_PROVIDER_UNAVAILABLE = "provider_unavailable"
 ERROR_SESSION_EXPIRED = "session_expired"
@@ -118,6 +119,8 @@ def error_agent(
         return _unsupported_capability_agent(model_requested, exc)
     if code == ERROR_UPSTREAM_PROTOCOL and mentions_consumer_challenge(str(exc)):
         return consumer_warmup_agent()
+    if code == ERROR_UPSTREAM_PROTOCOL and mentions_m365_conversation_listing(str(exc)):
+        return m365_conversation_listing_refresh_agent()
     if code == ERROR_UPSTREAM_PROTOCOL and mentions_m365_document_auth(str(exc)):
         return m365_document_refresh_agent()
     if code in {ERROR_LOGIN_REQUIRED, ERROR_PROVIDER_UNAVAILABLE}:
@@ -238,6 +241,15 @@ def mentions_m365_document_auth(detail: str) -> bool:
     return any(marker in lowered for marker in markers)
 
 
+def mentions_m365_conversation_listing(detail: str) -> bool:
+    lowered = detail.lower()
+    markers = (
+        "m365 conversation history",
+        "m365 conversation pagination",
+    )
+    return any(marker in lowered for marker in markers)
+
+
 def sanitize_text(value: str | None) -> str | None:
     if value is None:
         return None
@@ -273,7 +285,7 @@ def m365_document_refresh_agent() -> AgentGuidance:
     return AgentGuidance(
         summary="Microsoft 365 document access needs refresh before retrying.",
         user_message=(
-            "Microsoft 365 document access needs a refresh before this file request can run."
+            "Microsoft 365 document access needs refresh before this file request can run."
         ),
         recommended_action=ACTION_REFRESH_SESSION,
         recommended_command=["python", "-m", "copilot_tools_gateway", "refresh", "m365"],
@@ -284,6 +296,24 @@ def m365_document_refresh_agent() -> AgentGuidance:
             "Complete any browser sign-in steps if requested.",
             "If prompted, attach a small document in the browser and wait for Copilot to answer.",
             "Retry the original MCP tool call.",
+        ],
+    )
+
+
+def m365_conversation_listing_refresh_agent() -> AgentGuidance:
+    return AgentGuidance(
+        summary="Microsoft 365 conversation listing needs refresh before retrying.",
+        user_message=(
+            "Microsoft 365 conversation listing needs refresh before this request can run."
+        ),
+        recommended_action=ACTION_REFRESH_SESSION,
+        recommended_command=["python", "-m", "copilot_tools_gateway", "refresh", "m365"],
+        retryable=True,
+        retry_after_action=True,
+        next_steps=[
+            "Run the recommended refresh command.",
+            "Complete any browser sign-in steps if requested.",
+            "Retry copilot_list_conversations after copilot_status reports M365 is available.",
         ],
     )
 
@@ -305,6 +335,22 @@ def _unsupported_capability_agent(
             retryable=False,
             retry_after_action=False,
             next_steps=["Retry the file request with model m365-copilot."],
+        )
+    if model_requested == ProviderId.M365.value and "conversation listing" in detail:
+        return AgentGuidance(
+            summary="M365 conversation listing is not available for this request.",
+            user_message=(
+                "Microsoft 365 conversation listing can return the initial sidebar page. "
+                "Remote pagination is not validated yet."
+            ),
+            recommended_action=ACTION_UNSUPPORTED_CAPABILITY,
+            recommended_command=None,
+            retryable=False,
+            retry_after_action=False,
+            next_steps=[
+                "Call copilot_list_conversations without cursor.",
+                "Use a larger limit up to 50 if you need more entries from the initial page.",
+            ],
         )
     return AgentGuidance(
         summary="The selected provider does not support this tool request.",

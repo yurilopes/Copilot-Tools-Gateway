@@ -36,6 +36,10 @@ def test_m365_provider_reports_conversation_resume() -> None:
     assert M365Provider.capabilities.conversation_resume is True
 
 
+def test_m365_provider_reports_conversation_listing() -> None:
+    assert M365Provider.capabilities.conversation_listing is True
+
+
 def test_m365_provider_reports_real_streaming() -> None:
     assert M365Provider.capabilities.streaming is True
 

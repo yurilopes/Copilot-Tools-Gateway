@@ -22,10 +22,20 @@ Requirements:
 - Windows, macOS, or Linux.
 - A Microsoft account with access to the Copilot surface you want to use.
 
+The fastest path is consumer Copilot:
+
+1. Install the project.
+2. Run `python -m copilot_tools_gateway login consumer`.
+3. Add the MCP server to your client.
+4. Use `model: "copilot"` for chat, image generation, and image analysis.
+
+Use `m365-copilot` only when the signed-in account has Microsoft 365 Copilot or
+eligible Office 365 access. M365 is the provider for document attachments.
+
 Clone the repository and enter it:
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/yurilopes/Copilot-Tools-Gateway.git
 cd Copilot-Tools-Gateway
 ```
 
@@ -46,22 +56,24 @@ python -m pip install -e ".[dev,mcp]"
 ```
 
 If you plan to use `m365-copilot`, install the Playwright Chromium browser for
-the Microsoft 365 assisted login flow:
+the Microsoft 365 assisted login and refresh flow:
 
 ```bash
 python -m playwright install chromium
 ```
 
-Create at least one provider session:
+Create at least one provider session.
 
-```bash
-python -m copilot_tools_gateway login m365
-```
-
-or:
+Consumer Copilot:
 
 ```bash
 python -m copilot_tools_gateway login consumer
+```
+
+Microsoft 365 Copilot:
+
+```bash
+python -m copilot_tools_gateway login m365
 ```
 
 Run the MCP server over stdio:
@@ -105,6 +117,7 @@ response envelope, provider limitations, and agent recovery guidance.
 MCP tools:
 
 - `copilot_status`
+- `copilot_list_conversations`
 - `copilot_chat`
 - `copilot_generate_image`
 - `copilot_vision`
@@ -134,7 +147,8 @@ available because M365 usually has broader file and enterprise capabilities.
 Use `m365-copilot` when your account has Microsoft 365 Copilot or eligible
 Office 365 access and you need document attachments, Graph-backed file access,
 or M365 conversation behavior. Do not use this provider with a consumer-only
-Microsoft account.
+Microsoft account. The M365 attachment matrix has been validated through MCP
+for DOCX, PDF, XLSX, PPTX, TXT, and larger DOCX files.
 
 Use `copilot` when you want the consumer Microsoft Copilot account. Consumer
 Copilot supports chat, image generation, and PNG or JPEG image attachments. It
@@ -186,16 +200,43 @@ chat is accepted. When that happens, run `refresh consumer`, complete any
 challenge in the opened browser, send one normal Copilot message, wait for the
 answer, and retry the original MCP or HTTP request.
 
+When an agent or automation runs `refresh consumer` without interactive
+terminal input, the command prints the same browser warm-up instructions and
+continues with safe session capture instead of failing on stdin.
+
 Sessions are stored under `session/`, which is ignored by Git. Do not commit or
 share session files.
 
 ## Quick Smoke Checks
+
+After login, start with:
+
+```bash
+python -m copilot_tools_gateway mcp
+```
 
 Check provider status through an MCP client by calling:
 
 ```text
 copilot_status
 ```
+
+List resumable conversations:
+
+```json
+{
+  "model": "copilot",
+  "limit": 20
+}
+```
+
+The list returns conversation titles and `conversation_id` values only. Pass a
+returned `conversation_id` to `copilot_chat`, `copilot_vision`, or
+`copilot_chat_with_files` to resume that thread. Consumer and M365 conversation
+listing use direct API calls. M365 listing requires the web session captured by
+`login m365` or `refresh m365` and currently returns the initial sidebar page
+with local pagination for that initial page. Remote scroll pagination is not
+validated yet.
 
 Ask for simple chat:
 
@@ -275,6 +316,20 @@ M365 attachment matrix check:
 ```bash
 python tools/diagnostics/check_m365_attachment_matrix.py
 ```
+
+Conversation list protocol check:
+
+```bash
+python tools/diagnostics/check_conversation_list_protocol.py
+```
+
+For M365 sidebar discovery, add `--m365-ui`. If the persistent browser profile is
+not signed in, the sanitized result includes a `recommended_action` telling the
+operator to sign in and rerun the diagnostic.
+The UI diagnostic records only sanitized request, response, and WebSocket URL
+metadata such as host, path, query key names, status, and JSON shape.
+Runtime M365 conversation listing uses the direct endpoint validated by this
+diagnostic and does not require browser automation during MCP tool calls.
 
 Generate validation files without calling MCP:
 

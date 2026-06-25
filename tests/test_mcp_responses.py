@@ -5,15 +5,22 @@ from copilot_tools_gateway.domain.errors import (
     UnsupportedCapabilityError,
     UpstreamProtocolError,
 )
-from copilot_tools_gateway.domain.models import ProviderCapabilities, ProviderId, ProviderStatus
+from copilot_tools_gateway.domain.models import (
+    ConversationListResult,
+    ConversationSummary,
+    ProviderCapabilities,
+    ProviderId,
+    ProviderStatus,
+)
 from copilot_tools_gateway.mcp_responses import (
     AgentGuidance,
     chat_success_result,
+    conversation_list_success_result,
     mcp_error,
     mcp_status_response,
     mcp_success,
 )
-from copilot_tools_gateway.mcp_server import _chat_diagnostics
+from copilot_tools_gateway.mcp_server import _chat_diagnostics, _conversation_limit
 
 CAPABILITIES = ProviderCapabilities(
     chat=True,
@@ -65,6 +72,44 @@ def test_chat_success_uses_mcp_response_v2_envelope() -> None:
         "retry_after_action": False,
         "next_steps": [],
     }
+
+
+def test_conversation_list_success_uses_title_and_id_only() -> None:
+    result = conversation_list_success_result(
+        ConversationListResult(
+            conversations=[
+                ConversationSummary(
+                    conversation_id="conversation-1",
+                    title="Validation Marker Inquiry",
+                )
+            ],
+            count=1,
+            has_more=True,
+            next_cursor="/c/api/conversations?cursor=next",
+        )
+    )
+
+    assert result == {
+        "conversations": [
+            {
+                "title": "Validation Marker Inquiry",
+                "conversation_id": "conversation-1",
+            }
+        ],
+        "count": 1,
+        "has_more": True,
+        "next_cursor": "/c/api/conversations?cursor=next",
+    }
+    serialized = json.dumps(result).lower()
+    assert "snippet" not in serialized
+    assert "prompt" not in serialized
+
+
+def test_conversation_limit_is_bounded() -> None:
+    assert _conversation_limit(-1) == 1
+    assert _conversation_limit(0) == 1
+    assert _conversation_limit(20) == 20
+    assert _conversation_limit(500) == 50
 
 
 def test_provider_unavailable_includes_recommended_command() -> None:
@@ -132,6 +177,53 @@ def test_consumer_document_unsupported_recommends_m365() -> None:
     assert response["agent"]["retryable"] is False
     assert response["agent"]["next_steps"] == [
         "Retry the file request with model m365-copilot."
+    ]
+
+
+def test_m365_conversation_listing_unsupported_explains_initial_page() -> None:
+    response = mcp_error(
+        tool="copilot_list_conversations",
+        model_requested=ProviderId.M365.value,
+        exc=UnsupportedCapabilityError(
+            "M365 conversation listing pagination is not validated yet"
+        ),
+        statuses=[_status(ProviderId.M365, available=True)],
+    )
+
+    assert response["error"]["code"] == "unsupported_capability"
+    assert response["agent"]["recommended_action"] == "unsupported_capability"
+    assert response["agent"]["recommended_command"] is None
+    assert response["agent"]["retryable"] is False
+    assert response["agent"]["next_steps"] == [
+        "Call copilot_list_conversations without cursor.",
+        "Use a larger limit up to 50 if you need more entries from the initial page.",
+    ]
+
+
+def test_m365_conversation_listing_protocol_error_recommends_refresh() -> None:
+    response = mcp_error(
+        tool="copilot_list_conversations",
+        model_requested=ProviderId.M365.value,
+        exc=UpstreamProtocolError("M365 conversation history failed: 403"),
+        statuses=[_status(ProviderId.M365, available=True)],
+        provider=ProviderId.M365,
+    )
+
+    assert response["error"]["code"] == "upstream_protocol_error"
+    assert response["agent"]["recommended_action"] == "refresh_session"
+    assert response["agent"]["recommended_command"] == [
+        "python",
+        "-m",
+        "copilot_tools_gateway",
+        "refresh",
+        "m365",
+    ]
+    assert response["agent"]["retryable"] is True
+    assert response["agent"]["retry_after_action"] is True
+    assert response["agent"]["next_steps"] == [
+        "Run the recommended refresh command.",
+        "Complete any browser sign-in steps if requested.",
+        "Retry copilot_list_conversations after copilot_status reports M365 is available.",
     ]
 
 

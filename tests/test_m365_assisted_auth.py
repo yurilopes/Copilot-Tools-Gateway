@@ -4,6 +4,7 @@ import json
 from copilot_tools_gateway.providers.m365.assisted_auth import (
     M365TokenCapture,
     _format_browser_steps,
+    _wait_for_user_ready,
 )
 
 
@@ -55,6 +56,27 @@ def test_m365_browser_steps_report_safe_capture_state_without_tokens() -> None:
     assert "Search token captured: no" in message
     assert "cookies" not in message.lower()
     assert "browser storage" not in message.lower()
+
+
+def test_m365_wait_for_user_ready_handles_noninteractive_input(
+    monkeypatch,
+    capsys,
+) -> None:
+    def raise_eof(prompt: str) -> str:
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", raise_eof)
+
+    _wait_for_user_ready(
+        "Microsoft 365 Copilot refresh",
+        ("Wait for the page to finish loading.",),
+        "",
+        M365TokenCapture(),
+    )
+
+    output = capsys.readouterr().out
+    assert "Microsoft 365 Copilot refresh" in output
+    assert "No interactive terminal input is available" in output
 
 
 def _jwt(payload: dict[str, object]) -> str:

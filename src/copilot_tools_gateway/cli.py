@@ -2,9 +2,13 @@
 
 import argparse
 import os
+import sys
+from collections.abc import Callable
+from pathlib import Path
 
 import uvicorn
 
+from copilot_tools_gateway.domain.errors import GatewayError
 from copilot_tools_gateway.login import login_consumer, login_m365, refresh_consumer, refresh_m365
 from copilot_tools_gateway.mcp_server import run_mcp_server
 from copilot_tools_gateway.settings import GatewayPaths
@@ -29,13 +33,17 @@ def main() -> None:
 
     if args.command == "login":
         paths = GatewayPaths.from_cwd()
-        path = login_consumer(paths) if args.provider == "consumer" else login_m365(paths)
+        path = _run_session_action(
+            lambda: login_consumer(paths) if args.provider == "consumer" else login_m365(paths)
+        )
         print(f"Session saved to {path}")
         return
 
     if args.command == "refresh":
         paths = GatewayPaths.from_cwd()
-        path = refresh_consumer(paths) if args.provider == "consumer" else refresh_m365(paths)
+        path = _run_session_action(
+            lambda: refresh_consumer(paths) if args.provider == "consumer" else refresh_m365(paths)
+        )
         print(f"Session refreshed under {path.parent}")
         if args.provider == "consumer":
             print("Consumer browser warm-up saved. Retry the original MCP or HTTP request.")
@@ -54,3 +62,11 @@ def run_api(host: str | None = None, port: int | None = None) -> None:
     active_host = host or os.environ.get("HOST", "127.0.0.1")
     active_port = port or int(os.environ.get("PORT", "3991"))
     uvicorn.run("copilot_tools_gateway.api.server:app", host=active_host, port=active_port)
+
+
+def _run_session_action(action: Callable[[], Path]) -> Path:
+    try:
+        return action()
+    except GatewayError as exc:
+        print(f"Session command failed: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc

@@ -2,6 +2,7 @@
 
 from copilot_tools_gateway.domain.errors import GatewayError
 from copilot_tools_gateway.domain.models import (
+    ConversationListResult,
     ProviderCapabilities,
     ProviderId,
     ProviderStatus,
@@ -134,6 +135,21 @@ def file_chat_success_result(
     }
 
 
+def conversation_list_success_result(result: ConversationListResult) -> dict[str, object]:
+    return {
+        "conversations": [
+            {
+                "title": conversation.title,
+                "conversation_id": conversation.conversation_id,
+            }
+            for conversation in result.conversations
+        ],
+        "count": result.count,
+        "has_more": result.has_more,
+        "next_cursor": result.next_cursor,
+    }
+
+
 def _agent_dict(agent: AgentGuidance) -> dict[str, object]:
     return {
         "summary": agent.summary,
@@ -162,6 +178,7 @@ def _status_dict(status: ProviderStatus) -> dict[str, object]:
             "vision": status.capabilities.vision,
             "file_chat": status.capabilities.file_chat,
             "conversation_resume": status.capabilities.conversation_resume,
+            "conversation_listing": status.capabilities.conversation_listing,
         },
     }
 

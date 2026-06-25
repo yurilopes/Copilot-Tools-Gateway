@@ -17,6 +17,7 @@ from copilot_tools_gateway.domain.errors import (
 )
 from copilot_tools_gateway.domain.models import (
     ChatResult,
+    ConversationListResult,
     FileChatInput,
     GeneratedImage,
     ProviderCapabilities,
@@ -28,6 +29,7 @@ from copilot_tools_gateway.providers.m365 import transport as m365_transport
 from copilot_tools_gateway.providers.m365.auth import M365Session
 from copilot_tools_gateway.providers.m365.conversations import M365Conversations
 from copilot_tools_gateway.providers.m365.file_chat import chat_with_files
+from copilot_tools_gateway.providers.m365.history import list_m365_conversations
 from copilot_tools_gateway.providers.m365.protocol import (
     CHAT_ALLOWED_MESSAGE_TYPES,
     CHAT_OPTION_SETS,
@@ -43,6 +45,7 @@ from copilot_tools_gateway.providers.m365.tokens import graph_token_is_valid, se
 from copilot_tools_gateway.providers.m365.uploads import (
     upload_image,
 )
+from copilot_tools_gateway.providers.m365.web_auth import M365WebAuth
 
 M365_ORIGIN = Origin("https://m365.cloud.microsoft")
 
@@ -68,6 +71,7 @@ class M365Provider:
         vision=True,
         file_chat=True,
         conversation_resume=True,
+        conversation_listing=True,
     )
 
     def __init__(
@@ -75,11 +79,13 @@ class M365Provider:
         token_file: Path,
         graph_token_file: Path | None = None,
         search_token_file: Path | None = None,
+        web_auth_file: Path | None = None,
         timeout_seconds: float = 120,
     ) -> None:
         self._token_file = token_file
         self._graph_token_file = graph_token_file
         self._search_token_file = search_token_file
+        self._web_auth_file = web_auth_file
         self._timeout_seconds = timeout_seconds
         self._conversations = M365Conversations()
 
@@ -152,6 +158,19 @@ class M365Provider:
             )
         )
 
+    def list_conversations(
+        self,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> ConversationListResult:
+        return list_m365_conversations(
+            session=self._load_session(),
+            web_auth=self._load_web_auth(),
+            limit=limit,
+            cursor=cursor,
+            timeout_seconds=self._timeout_seconds,
+        )
+
     def _load_session(self) -> M365Session:
         if not self._token_file.exists():
             raise ProviderUnavailableError("M365 session is not configured")
@@ -192,6 +211,11 @@ class M365Provider:
                 "copilot_tools_gateway refresh m365"
             )
         return token
+
+    def _load_web_auth(self) -> M365WebAuth:
+        if self._web_auth_file is None:
+            raise ProviderUnavailableError("M365 web session is missing or expired")
+        return M365WebAuth.load(self._web_auth_file)
 
     async def _chat(self, prompt: str, conversation_id: str | None) -> ChatResult:
         session = self._load_session()

@@ -14,6 +14,7 @@ def build_registry(paths: GatewayPaths | None = None) -> ProviderRegistry:
                 token_file=active_paths.m365_token_file,
                 graph_token_file=active_paths.m365_graph_token_file,
                 search_token_file=active_paths.m365_search_token_file,
+                web_auth_file=active_paths.m365_web_auth_file,
             ),
             ConsumerProvider(auth_file=active_paths.consumer_auth_file, paths=active_paths),
         ]

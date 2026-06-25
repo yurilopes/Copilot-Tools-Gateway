@@ -6,6 +6,7 @@ import pytest
 from copilot_tools_gateway.domain.errors import ProviderUnavailableError, UnsupportedCapabilityError
 from copilot_tools_gateway.domain.models import (
     ChatResult,
+    ConversationListResult,
     FileChatInput,
     GeneratedImage,
     ProviderCapabilities,
@@ -13,6 +14,7 @@ from copilot_tools_gateway.domain.models import (
     ProviderStatus,
     VisionInput,
 )
+from copilot_tools_gateway.mcp_server import _resolve_conversation_listing_provider
 from copilot_tools_gateway.providers.registry import ProviderRegistry
 
 
@@ -62,6 +64,30 @@ class FakeProvider:
 
     def chat_with_files(self, request: FileChatInput) -> ChatResult:
         raise UnsupportedCapabilityError("not supported")
+
+    def list_conversations(
+        self,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> ConversationListResult:
+        return ConversationListResult(conversations=[], count=0, has_more=False)
+
+
+@dataclass
+class ListingFakeProvider(FakeProvider):
+    conversation_listing: bool = False
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(
+            chat=True,
+            streaming=True,
+            image_generation=False,
+            vision=False,
+            file_chat=False,
+            conversation_resume=False,
+            conversation_listing=self.conversation_listing,
+        )
 
 
 def test_auto_prefers_m365_when_available() -> None:
@@ -134,3 +160,16 @@ def test_auto_unavailable_provider_includes_first_recommended_command() -> None:
         registry.resolve("copilot-auto")
 
     assert "Run: python -m copilot_tools_gateway refresh m365" in str(exc_info.value)
+
+
+def test_conversation_listing_auto_uses_available_provider_with_capability() -> None:
+    registry = ProviderRegistry(
+        [
+            ListingFakeProvider(ProviderId.M365, available=True, conversation_listing=False),
+            ListingFakeProvider(ProviderId.CONSUMER, available=True, conversation_listing=True),
+        ]
+    )
+
+    provider = _resolve_conversation_listing_provider(registry, ProviderId.AUTO.value)
+
+    assert provider.provider_id == ProviderId.CONSUMER

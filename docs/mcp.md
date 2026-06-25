@@ -56,6 +56,7 @@ Supported model values:
 | Image analysis | Yes | Yes |
 | PNG and JPEG attachments | Yes | Yes |
 | Document attachments | Yes | No |
+| Conversation listing | Yes, initial sidebar page | Yes |
 | PDF, DOCX, PPTX, XLSX, TXT validation | Diagnostic coverage exists | No |
 
 M365 document attachments require valid Copilot, Graph, and search access. If
@@ -71,6 +72,15 @@ Pydoll browser-assisted image chat as an explicit fallback.
 Consumer login and refresh use Pydoll with a persistent browser profile. M365
 login and refresh use Playwright because the Microsoft 365 capture flow depends
 on that backend today.
+
+Conversation listing is available through direct API for both providers and
+returns only titles and ids. M365 listing uses the web session captured by
+`login m365` or `refresh m365` and returns the initial sidebar page. If the
+requested limit is smaller than that initial page, the gateway may return a
+local cursor for the remaining items already received. Remote pagination
+through sidebar scroll state is not validated yet. The safe
+diagnostic can inspect sanitized M365 sidebar protocol shapes without storing
+cookies, tokens, browser storage, raw requests, prompts, responses, or snippets.
 
 ## Response Envelope
 
@@ -158,6 +168,8 @@ Recommended actions:
 - `retry`: retry may be useful without a separate setup action.
 - `use_different_provider`: switch provider model.
 - `unsupported_capability`: choose a different tool or provider.
+- `run_diagnostic`: run a safe local diagnostic before enabling or retrying the
+  capability.
 
 ## Error Object
 
@@ -210,7 +222,8 @@ Success `result`:
         "image_generation": true,
         "vision": true,
         "file_chat": true,
-        "conversation_resume": true
+        "conversation_resume": true,
+        "conversation_listing": true
       }
     }
   ],
@@ -228,6 +241,67 @@ Agent behavior:
 - If no provider is available, follow the top-level recommendation.
 - Prefer M365 when both providers are available and the user did not specify a
   provider.
+
+### `copilot_list_conversations`
+
+List resumable Copilot conversations with safe metadata only.
+
+Arguments:
+
+- `model`: optional, defaults to `copilot-auto`.
+- `limit`: optional, defaults to 20. Values are bounded to 1 through 50.
+- `cursor`: optional pagination cursor returned by a previous call. Consumer
+  Copilot may return an upstream cursor. M365 may return a local cursor for the
+  already received initial sidebar page, but does not expose remote scroll
+  pagination yet.
+
+Example:
+
+```json
+{
+  "model": "copilot",
+  "limit": 20
+}
+```
+
+Success `result`:
+
+```json
+{
+  "conversations": [
+    {
+      "title": "Validation Marker Inquiry",
+      "conversation_id": "example-conversation-id"
+    }
+  ],
+  "count": 1,
+  "has_more": false,
+  "next_cursor": null
+}
+```
+
+Agent behavior:
+
+- Show titles to the user when they need to choose a thread.
+- Pass the selected `conversation_id` to `copilot_chat`, `copilot_vision`, or
+  `copilot_chat_with_files`.
+- Do not treat the title as conversation content. The tool does not return
+  messages, prompts, responses, or snippets.
+- Use `model: "copilot"` for direct consumer history.
+- Use `model: "m365-copilot"` for Microsoft 365 history. M365 returns the
+  initial sidebar page and can page locally through that initial result when
+  the requested limit is smaller than the page. It does not expose remote
+  scroll pagination yet.
+- If M365 listing fails with refresh guidance, run `python -m copilot_tools_gateway refresh m365`.
+  The refresh flow captures the web session needed by the direct history
+  endpoint.
+- For M365 protocol discovery, run `python tools/diagnostics/check_conversation_list_protocol.py --m365-ui`.
+  Follow the diagnostic `recommended_action` if the browser profile is not
+  signed in or the sidebar history was not opened. The diagnostic records only
+  sanitized request, response, and WebSocket URL metadata, plus safe JSON shape
+  information when available.
+- If the provider needs login or refresh, follow `agent.recommended_command`
+  and retry after `copilot_status` reports the provider is available.
 
 ### `copilot_chat`
 

@@ -5,6 +5,7 @@ from typing import Protocol
 
 from copilot_tools_gateway.domain.models import (
     ChatResult,
+    ConversationListResult,
     FileChatInput,
     GeneratedImage,
     ProviderCapabilities,
@@ -36,3 +37,10 @@ class CopilotProvider(Protocol):
 
     def chat_with_files(self, request: FileChatInput) -> ChatResult:
         """Ask the provider to answer using local files as attachments."""
+
+    def list_conversations(
+        self,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> ConversationListResult:
+        """List resumable provider conversations with safe metadata only."""

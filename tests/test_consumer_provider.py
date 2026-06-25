@@ -98,6 +98,7 @@ def test_consumer_status_reports_image_file_chat_capability(tmp_path) -> None:
 
     assert status.capabilities.vision is True
     assert status.capabilities.file_chat is True
+    assert status.capabilities.conversation_listing is True
 
 
 def test_consumer_file_chat_rejects_non_image_attachments(tmp_path) -> None:

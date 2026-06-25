@@ -10,18 +10,20 @@ from urllib.parse import parse_qs, urlsplit
 from playwright.sync_api import BrowserContext, Page, Playwright
 from playwright.sync_api import Error as PlaywrightError
 
-from copilot_tools_gateway.domain.errors import LoginFailedError
+from copilot_tools_gateway.domain.errors import LoginFailedError, UpstreamProtocolError
 from copilot_tools_gateway.domain.json_types import object_value, string_value
 from copilot_tools_gateway.providers.m365.auth import M365Session
 from copilot_tools_gateway.providers.m365.tokens import (
     M365CapturedTokenKind,
     classify_m365_access_token,
 )
+from copilot_tools_gateway.providers.m365.web_auth import M365WebAuth
 from copilot_tools_gateway.settings import GatewayPaths
 
 M365_URL = "https://m365.cloud.microsoft/chat/"
 M365_CAPTURE_WAIT_MS = 8_000
 M365_RELOAD_WAIT_MS = 5_000
+M365_WEB_SESSION_WAIT_MS = 10_000
 M365_BROWSER_TIMEOUT_MS = 60_000
 M365_LOGIN_STEPS = (
     "Sign in to Microsoft 365 Copilot if needed.",
@@ -158,7 +160,7 @@ def capture_m365_session(
                 page.reload(wait_until="domcontentloaded", timeout=M365_BROWSER_TIMEOUT_MS)
                 _wait_for_capture(page, capture, M365_RELOAD_WAIT_MS)
             if not capture.has_chat_token or not capture.has_document_tokens:
-                input(_format_browser_steps(title, steps, prompt, capture))
+                _wait_for_user_ready(title, steps, prompt, capture)
                 _wait_for_capture(page, capture, M365_CAPTURE_WAIT_MS)
             if not capture.has_chat_token or not capture.has_document_tokens:
                 page.reload(wait_until="domcontentloaded", timeout=M365_BROWSER_TIMEOUT_MS)
@@ -176,6 +178,9 @@ def capture_m365_session(
                     capture.search_tokens[-1],
                     encoding="utf-8",
                 )
+            web_auth = _validated_web_auth(context, page, session)
+            if web_auth is not None:
+                web_auth.save(paths.m365_web_auth_file)
             return paths.m365_token_file
         finally:
             if page is not None and handlers is not None:
@@ -190,6 +195,32 @@ def _launch_m365_context(playwright: Playwright, profile_dir: Path) -> BrowserCo
         args=["--disable-blink-features=AutomationControlled"],
         timeout=M365_BROWSER_TIMEOUT_MS,
     )
+
+
+def _validated_web_auth(
+    context: BrowserContext,
+    page: Page,
+    session: M365Session,
+) -> M365WebAuth | None:
+    from copilot_tools_gateway.providers.m365.history import list_m365_conversations
+
+    for _ in range(3):
+        page.wait_for_timeout(M365_WEB_SESSION_WAIT_MS)
+        web_auth = M365WebAuth.from_browser_cookies(context.cookies([M365_URL]))
+        if not web_auth.cookies:
+            continue
+        try:
+            list_m365_conversations(
+                session=session,
+                web_auth=web_auth,
+                limit=1,
+                cursor=None,
+                timeout_seconds=30,
+            )
+            return web_auth
+        except UpstreamProtocolError:
+            page.reload(wait_until="domcontentloaded", timeout=M365_BROWSER_TIMEOUT_MS)
+    return None
 
 
 def _attach_capture_handlers(page: Page, capture: M365TokenCapture) -> M365CaptureHandlers:
@@ -254,6 +285,28 @@ def _format_browser_steps(
         ]
     )
     return "\n".join(lines)
+
+
+def _wait_for_user_ready(
+    title: str,
+    steps: tuple[str, ...],
+    prompt: str,
+    capture: M365TokenCapture,
+) -> None:
+    try:
+        input(_format_browser_steps(title, steps, prompt, capture))
+    except EOFError:
+        print(
+            _format_browser_steps(
+                title,
+                (
+                    *steps,
+                    "No interactive terminal input is available, so capture will continue now.",
+                ),
+                "",
+                capture,
+            )
+        )
 
 
 def _yes_no(value: bool) -> str:

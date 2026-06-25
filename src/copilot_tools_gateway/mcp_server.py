@@ -4,16 +4,19 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from copilot_tools_gateway.app_factory import build_registry
-from copilot_tools_gateway.domain.errors import GatewayError
+from copilot_tools_gateway.domain.errors import GatewayError, UnsupportedCapabilityError
 from copilot_tools_gateway.domain.models import FileChatInput, ProviderId, VisionInput
 from copilot_tools_gateway.mcp_guidance import AgentGuidance
 from copilot_tools_gateway.mcp_responses import (
     chat_success_result,
+    conversation_list_success_result,
     file_chat_success_result,
     mcp_error,
     mcp_status_response,
     mcp_success,
 )
+from copilot_tools_gateway.providers.base import CopilotProvider
+from copilot_tools_gateway.providers.registry import ProviderRegistry
 
 
 def run_mcp_server() -> None:
@@ -26,6 +29,55 @@ def run_mcp_server() -> None:
     def copilot_status() -> dict[str, object]:
         """Return MCP response v2 provider status and safe next-step guidance."""
         return mcp_status_response(registry.list_statuses())
+
+    @server.tool()
+    def copilot_list_conversations(
+        model: str = ProviderId.AUTO.value,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> dict[str, object]:
+        """List resumable Copilot conversations with title and conversation_id only.
+
+        Accepted models are copilot-auto, m365-copilot, and copilot. The result
+        intentionally excludes snippets, prompts, responses, and raw provider
+        payloads. Pass a returned conversation_id to chat, vision, or file tools.
+        """
+        try:
+            provider = _resolve_conversation_listing_provider(registry, model)
+            if not provider.capabilities.conversation_listing:
+                raise UnsupportedCapabilityError(
+                    f"{provider.provider_id.value} does not support conversation listing yet"
+                )
+            result = provider.list_conversations(limit=_conversation_limit(limit), cursor=cursor)
+        except GatewayError as exc:
+            return mcp_error(
+                tool="copilot_list_conversations",
+                model_requested=model,
+                exc=exc,
+                statuses=registry.list_statuses(),
+            )
+        return mcp_success(
+            tool="copilot_list_conversations",
+            model_requested=model,
+            provider=provider.provider_id,
+            result=conversation_list_success_result(result),
+            agent=AgentGuidance(
+                summary="Copilot conversations were listed.",
+                user_message="Copilot conversation titles and ids are available.",
+                recommended_action="none",
+                recommended_command=None,
+                retryable=False,
+                retry_after_action=False,
+                next_steps=[
+                    "Choose a conversation_id from the list.",
+                    "Pass it to copilot_chat, copilot_vision, or copilot_chat_with_files.",
+                ],
+            ),
+            diagnostics={
+                "conversation_count": result.count,
+                "has_more": result.has_more,
+            },
+        )
 
     @server.tool()
     def copilot_chat(
@@ -226,3 +278,23 @@ def _attachment_mode(file_paths: list[str]) -> str:
     if extensions and extensions.isdisjoint(image_extensions):
         return "document"
     return "mixed"
+
+
+def _conversation_limit(limit: int) -> int:
+    return min(max(limit, 1), 50)
+
+
+def _resolve_conversation_listing_provider(
+    registry: ProviderRegistry,
+    model: str,
+) -> CopilotProvider:
+    if model != ProviderId.AUTO.value:
+        return registry.resolve(model)
+    for provider_id in (ProviderId.M365, ProviderId.CONSUMER):
+        provider = registry.provider(provider_id)
+        if provider is None or not provider.capabilities.conversation_listing:
+            continue
+        status = provider.status()
+        if status.available:
+            return provider
+    return registry.resolve(model)

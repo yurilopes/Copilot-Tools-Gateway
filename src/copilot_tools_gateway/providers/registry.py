@@ -14,6 +14,9 @@ class ProviderRegistry:
     def list_statuses(self) -> list[ProviderStatus]:
         return [provider.status() for provider in self._providers.values()]
 
+    def provider(self, provider_id: ProviderId) -> CopilotProvider | None:
+        return self._providers.get(provider_id)
+
     def resolve(self, model: str | ProviderId | None) -> CopilotProvider:
         provider_id = self._normalize_model(model)
         if provider_id == ProviderId.AUTO:

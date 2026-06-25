@@ -20,6 +20,7 @@ class ProviderCapabilities:
     vision: bool
     file_chat: bool
     conversation_resume: bool
+    conversation_listing: bool = False
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,20 @@ class FileChatInput:
     prompt: str
     file_paths: list[str]
     conversation_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ConversationSummary:
+    conversation_id: str
+    title: str
+
+
+@dataclass(frozen=True)
+class ConversationListResult:
+    conversations: list[ConversationSummary]
+    count: int
+    has_more: bool
+    next_cursor: str | None = None
 
 
 def provider_model_ids() -> list[str]:

@@ -7,6 +7,7 @@ from copilot_tools_gateway.domain.errors import UnsupportedCapabilityError, Upst
 from copilot_tools_gateway.domain.json_types import JsonValue
 from copilot_tools_gateway.domain.models import (
     ChatResult,
+    ConversationListResult,
     FileChatInput,
     GeneratedImage,
     ProviderCapabilities,
@@ -18,6 +19,7 @@ from copilot_tools_gateway.providers.consumer.auth import ConsumerAuth
 from copilot_tools_gateway.providers.consumer.browser_image_chat import run_browser_image_chat
 from copilot_tools_gateway.providers.consumer.conversations import ConsumerConversations
 from copilot_tools_gateway.providers.consumer.driver import ConsumerConversation, ConsumerDriver
+from copilot_tools_gateway.providers.consumer.history import list_consumer_conversations
 from copilot_tools_gateway.providers.consumer.vision_failures import (
     consumer_image_response_is_unreadable,
 )
@@ -51,6 +53,7 @@ class ConsumerProvider:
         vision=True,
         file_chat=True,
         conversation_resume=True,
+        conversation_listing=True,
     )
 
     def __init__(
@@ -197,6 +200,22 @@ class ConsumerProvider:
             conversation.conversation_id,
             conversation.prompt,
             paths,
+        )
+
+    def list_conversations(
+        self,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> ConversationListResult:
+        auth = ConsumerAuth.load(self._auth_file)
+        if auth.expired:
+            raise UnsupportedCapabilityError(CONSUMER_STALE_SESSION_MESSAGE)
+        return list_consumer_conversations(
+            cookies=auth.cookies,
+            access_token=auth.access_token,
+            limit=limit,
+            cursor=cursor,
+            timeout_seconds=self._timeout_seconds,
         )
 
     def _chat_with_images_direct(
