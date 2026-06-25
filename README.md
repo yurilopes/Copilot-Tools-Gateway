@@ -114,7 +114,8 @@ OpenAI-compatible HTTP compatibility surface:
 Provider models:
 
 - `copilot-auto` chooses a valid configured provider automatically.
-- `m365-copilot` uses Microsoft 365 Copilot.
+- `m365-copilot` uses Microsoft 365 Copilot and requires an account with
+  Microsoft 365 Copilot or eligible Office 365 access.
 - `copilot` uses consumer Microsoft Copilot.
 
 MCP is the primary integration surface. The HTTP API exists for simple local
@@ -125,8 +126,10 @@ compatibility.
 Use `copilot-auto` by default. It prefers M365 when both providers are
 available because M365 usually has broader file and enterprise capabilities.
 
-Use `m365-copilot` when you need Microsoft 365 Copilot, document attachments,
-Graph-backed file access, or M365 conversation behavior.
+Use `m365-copilot` when your account has Microsoft 365 Copilot or eligible
+Office 365 access and you need document attachments, Graph-backed file access,
+or M365 conversation behavior. Do not use this provider with a consumer-only
+Microsoft account.
 
 Use `copilot` when you want the consumer Microsoft Copilot account. Consumer
 Copilot supports chat, image generation, and PNG or JPEG image attachments. It
