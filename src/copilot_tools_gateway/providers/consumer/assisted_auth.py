@@ -149,13 +149,29 @@ async def _capture_consumer_session(
         tab = await browser.start()
         await tab.go_to(CONSUMER_URL, timeout=45)
         await asyncio.sleep(CONSUMER_CAPTURE_WAIT_SECONDS)
-        input(format_browser_steps(title, steps, prompt))
+        wait_for_user_ready(title, steps, prompt)
         await asyncio.sleep(CONSUMER_CAPTURE_WAIT_SECONDS)
         auth = await capture_consumer_auth(tab)
         if auth is None:
             raise LoginFailedError("Consumer login did not capture cookies or a Copilot token")
         auth.save(paths.consumer_auth_file)
         return paths.consumer_auth_file
+
+
+def wait_for_user_ready(title: str, steps: tuple[str, ...], prompt: str) -> None:
+    try:
+        input(format_browser_steps(title, steps, prompt))
+    except EOFError:
+        print(
+            format_browser_steps(
+                title,
+                (
+                    *steps,
+                    "No interactive terminal input is available, so capture will continue now.",
+                ),
+                "",
+            )
+        )
 
 
 def load_pydoll_modules(root: Path) -> PydollModules:
